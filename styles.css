@@ -258,6 +258,18 @@ body.portfolio {
   width: 100%;
 }
 
+.portfolio .pane-grid__empty {
+  grid-column: 1 / -1;
+  padding: 2.4rem;
+  border-radius: var(--card-radius);
+  background: rgba(14, 20, 33, 0.62);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  text-align: center;
+  color: var(--text-secondary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .portfolio .pane {
   position: relative;
   border: none;

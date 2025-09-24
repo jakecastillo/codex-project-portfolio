@@ -24,10 +24,21 @@ A curated portfolio of application prototypes built **entirely using Codex** (Op
 
 ## ✅ Running Locally
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/jakecastillo/codex-project-portfolio.git
-   cd codex-project-portfolio
+```bash
+git clone https://github.com/jakecastillo/codex-project-portfolio.git
+cd codex-project-portfolio
+npm run build:catalog
+npx http-server .
+```
+
+> Any static server works. `python -m http.server` is a quick alternative if you do not have `http-server` installed.
+
+## 🧱 Adding a New Project
+
+1. Create a new folder in `applications/` with your project's assets (`index.html`, CSS, scripts, etc.).
+2. Add a `manifest.json` to that folder describing the panel (see existing projects for the field reference).
+3. Run `npm run build:catalog` to regenerate `applications/catalog.json` and `applications/catalog.js`.
+4. Reload the portfolio home screen—your new project panel appears automatically.
 
 ## 🌍 Deploying to GitHub Pages
 

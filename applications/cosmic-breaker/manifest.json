@@ -1,0 +1,18 @@
+{
+  "id": "cosmic-breaker",
+  "order": 1,
+  "tag": "Interactive Arcade",
+  "title": "Cosmic Breaker",
+  "summary": "Immersive space-themed arcade experience blending reactive physics with neon UI systems.",
+  "description": "Cosmic Breaker reimagines the block-breaker genre as a cinematic mission console. We combined tactile paddle mechanics with procedurally generated sectors, telemetry overlays, and adaptive power-up orchestration to keep momentum high across varied play styles.",
+  "highlights": [
+    "Dynamic mission sequencing with difficulty sculpting per sector.",
+    "Overlay-driven HUD system designed for controller, touch, and keyboard parity.",
+    "Particle and neon glow pipeline optimised for WebGL fallbacks."
+  ],
+  "tech": ["TypeScript", "Canvas API", "Web Audio"],
+  "links": [
+    { "label": "Launch playable demo", "href": "./applications/cosmic-breaker/cosmic-breaker.html" }
+  ],
+  "paneClass": "pane--aurora"
+}
