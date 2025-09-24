@@ -44,6 +44,12 @@ const ROCKET_HEIGHT = 48;
 const ROCKET_BLAST_RADIUS = 96;
 const MAX_ACTIVE_BALLS = 6;
 
+const PHYSICS_STEP = 1 / 240;
+const MAX_FRAME_DELTA = 1 / 24;
+const MAX_BALL_SUBSTEP = 1 / 180;
+
+let physicsAccumulator = 0;
+
 const POWER_UP_DEFS = {
   'multi-ball': { color: '#6bf7c2', label: 'x3' },
   shield: { color: '#00f7ff', label: 'SH' },
@@ -482,6 +488,8 @@ function resetRound(message) {
   state.powerUps = [];
   state.rocket = null;
   state.bricksSinceDrop = 0;
+  physicsAccumulator = 0;
+  state.lastTime = performance.now();
   if (message) {
     showOverlay('Mission Update', message);
   } else {
@@ -508,6 +516,8 @@ function startGame() {
   }
   state.bricksSinceDrop = 0;
   state.mode = 'running';
+  physicsAccumulator = 0;
+  state.lastTime = performance.now();
   updateHud();
 }
 
@@ -525,6 +535,7 @@ function gameOver() {
   state.rocket = null;
   state.shield = null;
   state.bricksSinceDrop = 0;
+  physicsAccumulator = 0;
   showOverlay('Mission Failed', `Final score: <strong>${state.score}</strong><br>Press <strong>Space</strong> or launch to restart.`, 'Restart');
   updateHud();
 }
@@ -565,7 +576,10 @@ function handlePaddleCollision(ball) {
     ball.velocity.y = -Math.abs(Math.cos(bounceAngle) * speed);
     ball.y = paddleTop - ball.radius - 1;
     ball.spin = (relativeIntersect + (Math.random() - 0.5) * 0.4) * BALL_SPIN_VARIANCE;
+    return true;
   }
+
+  return false;
 }
 
 function destroyBrick(brick) {
@@ -606,44 +620,77 @@ function handleBrickCollision(ball) {
       }
 
       destroyBrick(brick);
-      break;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolveWallCollision(ball) {
+  let collided = false;
+  const minX = GAME_BOUNDS.left + ball.radius;
+  const maxX = GAME_BOUNDS.right - ball.radius;
+  const minY = GAME_BOUNDS.top + ball.radius;
+
+  if (ball.x < minX) {
+    const overshoot = minX - ball.x;
+    ball.x = minX + overshoot;
+    ball.velocity.x = Math.abs(ball.velocity.x);
+    collided = true;
+  } else if (ball.x > maxX) {
+    const overshoot = ball.x - maxX;
+    ball.x = maxX - overshoot;
+    ball.velocity.x = -Math.abs(ball.velocity.x);
+    collided = true;
+  }
+
+  if (ball.y < minY) {
+    const overshoot = minY - ball.y;
+    ball.y = minY + overshoot;
+    ball.velocity.y = Math.abs(ball.velocity.y);
+    collided = true;
+  }
+
+  return collided;
+}
+
+function integrateBall(ball, delta) {
+  const subSteps = Math.max(1, Math.ceil(delta / MAX_BALL_SUBSTEP));
+  const step = delta / subSteps;
+
+  for (let index = 0; index < subSteps; index += 1) {
+    ball.x += ball.velocity.x * step;
+    ball.y += ball.velocity.y * step;
+
+    const hitWall = resolveWallCollision(ball);
+    const hitBrick = handleBrickCollision(ball);
+    const hitPaddle = handlePaddleCollision(ball);
+
+    ball.x += ball.spin * 12 * step;
+
+    if (!hitWall && !hitBrick && !hitPaddle) {
+      continue;
     }
   }
 }
 
-function updateBalls(delta, timestamp) {
+function stepPhysics(delta, timestamp) {
   if (state.mode !== 'running') return;
   const activeBalls = [];
 
   for (const ball of state.balls) {
-    ball.x += ball.velocity.x * delta;
-    ball.y += ball.velocity.y * delta;
-
-    if (ball.x - ball.radius <= GAME_BOUNDS.left) {
-      ball.x = GAME_BOUNDS.left + ball.radius;
-      ball.velocity.x = Math.abs(ball.velocity.x);
-    }
-
-    if (ball.x + ball.radius >= GAME_BOUNDS.right) {
-      ball.x = GAME_BOUNDS.right - ball.radius;
-      ball.velocity.x = -Math.abs(ball.velocity.x);
-    }
-
-    if (ball.y - ball.radius <= GAME_BOUNDS.top) {
-      ball.y = GAME_BOUNDS.top + ball.radius;
-      ball.velocity.y = Math.abs(ball.velocity.y);
-    }
-
-    handlePaddleCollision(ball);
-    handleBrickCollision(ball);
+    integrateBall(ball, delta);
 
     if (ball.y + ball.radius >= GAME_BOUNDS.bottom) {
       if (state.shield && state.shield.expiresAt > timestamp) {
         ball.y = GAME_BOUNDS.bottom - ball.radius - 1;
         ball.velocity.y = -Math.abs(ball.velocity.y);
-      } else {
+        state.shield = null;
+        activeBalls.push(ball);
         continue;
       }
+      continue;
     }
 
     activeBalls.push(ball);
@@ -871,14 +918,20 @@ function createBricks(level) {
 }
 
 function loop(timestamp) {
-  const delta = (timestamp - state.lastTime) / 1000;
+  const frameDelta = Math.min((timestamp - state.lastTime) / 1000, MAX_FRAME_DELTA);
   state.lastTime = timestamp;
 
-  handleInput(delta);
+  handleInput(frameDelta);
   positionReadyBalls();
-  updateBalls(delta, timestamp);
-  updatePowerUps(delta);
-  updateRocket(delta);
+
+  physicsAccumulator += frameDelta;
+  while (physicsAccumulator >= PHYSICS_STEP) {
+    stepPhysics(PHYSICS_STEP, timestamp);
+    physicsAccumulator -= PHYSICS_STEP;
+  }
+
+  updatePowerUps(frameDelta);
+  updateRocket(frameDelta);
   updateShield(timestamp);
 
   if (renderer) {
@@ -924,7 +977,7 @@ function init() {
     return;
   }
 
-  renderer = createRenderer(gl);
+  renderer = new MissionRenderer(gl, canvas);
   renderer.handleResize();
 
   showOverlay('Launch Sequence Ready', 'Press <strong>Space</strong> or tap <strong>Launch</strong> to begin your mission.');
@@ -976,89 +1029,97 @@ window.addEventListener('resize', () => {
   paddle.x = paddle.x;
 });
 
-init();
+class MissionRenderer {
+  constructor(glContext, canvasElement) {
+    this.gl = glContext;
+    this.canvas = canvasElement;
+    this.program = createProgram(this.gl, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
+    this.gl.useProgram(this.program);
 
-function createRenderer(glContext) {
-  const program = createProgram(glContext, VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE);
-  glContext.useProgram(program);
+    this.attribLocations = {
+      position: this.gl.getAttribLocation(this.program, 'aPosition'),
+      normal: this.gl.getAttribLocation(this.program, 'aNormal')
+    };
 
-  const attribLocations = {
-    position: glContext.getAttribLocation(program, 'aPosition'),
-    normal: glContext.getAttribLocation(program, 'aNormal')
-  };
+    this.uniformLocations = {
+      projection: this.gl.getUniformLocation(this.program, 'uProjection'),
+      view: this.gl.getUniformLocation(this.program, 'uView'),
+      model: this.gl.getUniformLocation(this.program, 'uModel'),
+      normalMatrix: this.gl.getUniformLocation(this.program, 'uNormalMatrix'),
+      color: this.gl.getUniformLocation(this.program, 'uColor'),
+      emissive: this.gl.getUniformLocation(this.program, 'uEmissive'),
+      lightDirection: this.gl.getUniformLocation(this.program, 'uLightDirection'),
+      lightColor: this.gl.getUniformLocation(this.program, 'uLightColor'),
+      ambientColor: this.gl.getUniformLocation(this.program, 'uAmbientColor')
+    };
 
-  const uniformLocations = {
-    projection: glContext.getUniformLocation(program, 'uProjection'),
-    view: glContext.getUniformLocation(program, 'uView'),
-    model: glContext.getUniformLocation(program, 'uModel'),
-    normalMatrix: glContext.getUniformLocation(program, 'uNormalMatrix'),
-    color: glContext.getUniformLocation(program, 'uColor'),
-    emissive: glContext.getUniformLocation(program, 'uEmissive'),
-    lightDirection: glContext.getUniformLocation(program, 'uLightDirection'),
-    lightColor: glContext.getUniformLocation(program, 'uLightColor'),
-    ambientColor: glContext.getUniformLocation(program, 'uAmbientColor')
-  };
+    this.meshes = {
+      cube: createMesh(this.gl, createBoxGeometry()),
+      sphere: createMesh(this.gl, createSphereGeometry(0.5, 18, 12)),
+      plane: createMesh(this.gl, createPlaneGeometry())
+    };
 
-  const cubeMesh = createMesh(glContext, createBoxGeometry());
-  const sphereMesh = createMesh(glContext, createSphereGeometry(0.5, 18, 12));
-  const planeMesh = createMesh(glContext, createPlaneGeometry());
+    this.projectionMatrix = Mat4.create();
+    this.viewMatrix = Mat4.create();
+    this.modelMatrix = Mat4.create();
+    this.normalMatrix = Mat3.create();
+    this.cameraTarget = [0, 0, -200];
+    this.up = [0, 1, 0];
 
-  const projectionMatrix = Mat4.create();
-  const viewMatrix = Mat4.create();
-  const modelMatrix = Mat4.create();
-  const normalMatrix = Mat3.create();
-  const cameraTarget = [0, 0, -200];
-  const up = [0, 1, 0];
-
-  glContext.enable(glContext.DEPTH_TEST);
-  glContext.enable(glContext.CULL_FACE);
-  glContext.cullFace(glContext.BACK);
-
-  function updateProjection() {
-    const aspect = canvas.width / canvas.height;
-    Mat4.perspective(projectionMatrix, Math.PI / 3.4, aspect, 0.1, 4000);
+    this.gl.enable(this.gl.DEPTH_TEST);
+    this.gl.enable(this.gl.CULL_FACE);
+    this.gl.cullFace(this.gl.BACK);
   }
 
-  function drawMesh(mesh, position, scale, color, emissive, rotation) {
-    Mat4.identity(modelMatrix);
-    Mat4.translate(modelMatrix, modelMatrix, position);
+  handleResize() {
+    this._updateProjection();
+  }
+
+  _updateProjection() {
+    const aspect = this.canvas.width / this.canvas.height || 1;
+    Mat4.perspective(this.projectionMatrix, Math.PI / 3.4, aspect, 0.1, 4000);
+  }
+
+  _drawMesh(mesh, position, scale, color, emissive, rotation) {
+    Mat4.identity(this.modelMatrix);
+    Mat4.translate(this.modelMatrix, this.modelMatrix, position);
     if (rotation) {
-      if (rotation.x) Mat4.rotateX(modelMatrix, modelMatrix, rotation.x);
-      if (rotation.y) Mat4.rotateY(modelMatrix, modelMatrix, rotation.y);
-      if (rotation.z) Mat4.rotateZ(modelMatrix, modelMatrix, rotation.z);
+      if (rotation.x) Mat4.rotateX(this.modelMatrix, this.modelMatrix, rotation.x);
+      if (rotation.y) Mat4.rotateY(this.modelMatrix, this.modelMatrix, rotation.y);
+      if (rotation.z) Mat4.rotateZ(this.modelMatrix, this.modelMatrix, rotation.z);
     }
-    Mat4.scale(modelMatrix, modelMatrix, scale);
+    Mat4.scale(this.modelMatrix, this.modelMatrix, scale);
 
-    glContext.bindBuffer(glContext.ARRAY_BUFFER, mesh.positionBuffer);
-    glContext.vertexAttribPointer(attribLocations.position, 3, glContext.FLOAT, false, 0, 0);
-    glContext.enableVertexAttribArray(attribLocations.position);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, mesh.positionBuffer);
+    this.gl.vertexAttribPointer(this.attribLocations.position, 3, this.gl.FLOAT, false, 0, 0);
+    this.gl.enableVertexAttribArray(this.attribLocations.position);
 
-    glContext.bindBuffer(glContext.ARRAY_BUFFER, mesh.normalBuffer);
-    glContext.vertexAttribPointer(attribLocations.normal, 3, glContext.FLOAT, false, 0, 0);
-    glContext.enableVertexAttribArray(attribLocations.normal);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, mesh.normalBuffer);
+    this.gl.vertexAttribPointer(this.attribLocations.normal, 3, this.gl.FLOAT, false, 0, 0);
+    this.gl.enableVertexAttribArray(this.attribLocations.normal);
 
-    glContext.bindBuffer(glContext.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
 
-    Mat3.fromMat4(normalMatrix, modelMatrix);
-    if (!Mat3.invert(normalMatrix, normalMatrix)) {
-      Mat3.identity(normalMatrix);
+    Mat3.fromMat4(this.normalMatrix, this.modelMatrix);
+    if (!Mat3.invert(this.normalMatrix, this.normalMatrix)) {
+      Mat3.identity(this.normalMatrix);
     }
-    Mat3.transpose(normalMatrix, normalMatrix);
+    Mat3.transpose(this.normalMatrix, this.normalMatrix);
 
-    glContext.uniformMatrix4fv(uniformLocations.model, false, modelMatrix);
-    glContext.uniformMatrix3fv(uniformLocations.normalMatrix, false, normalMatrix);
-    glContext.uniform3fv(uniformLocations.color, color);
-    glContext.uniform3fv(uniformLocations.emissive, emissive);
+    this.gl.uniformMatrix4fv(this.uniformLocations.model, false, this.modelMatrix);
+    this.gl.uniformMatrix3fv(this.uniformLocations.normalMatrix, false, this.normalMatrix);
+    this.gl.uniform3fv(this.uniformLocations.color, color);
+    this.gl.uniform3fv(this.uniformLocations.emissive, emissive);
 
-    glContext.drawElements(glContext.TRIANGLES, mesh.indexCount, mesh.indexType, 0);
+    this.gl.drawElements(this.gl.TRIANGLES, mesh.indexCount, mesh.indexType, 0);
   }
 
-  function drawBoard(timestamp) {
+  _drawBoard(timestamp) {
     const glowPhase = (Math.sin(timestamp * 0.002) + 1) / 2;
 
     const centerWorld = toWorld(BOARD.centerX, BOARD.centerY, -40);
-    drawMesh(
-      planeMesh,
+    this._drawMesh(
+      this.meshes.plane,
       [centerWorld.x, centerWorld.y - 120, centerWorld.z - 200],
       [BOARD.width * WORLD_SCALE.x * 1.3, BOARD.height * 0.05, BOARD.height * 0.8],
       [0.05, 0.07, 0.18],
@@ -1070,8 +1131,8 @@ function createRenderer(glContext) {
     const frameEmissive = [0.0, 0.12 + glowPhase * 0.35, 0.3 + glowPhase * 0.4];
 
     const topPos = toWorld(BOARD.centerX, GAME_BOUNDS.top - 10, -20);
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [topPos.x, topPos.y, topPos.z],
       [BOARD.width * WORLD_SCALE.x + 40, 12, 30],
       frameColor,
@@ -1080,8 +1141,8 @@ function createRenderer(glContext) {
     );
 
     const bottomPos = toWorld(BOARD.centerX, GAME_BOUNDS.bottom + 10, 40);
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [bottomPos.x, bottomPos.y, bottomPos.z],
       [BOARD.width * WORLD_SCALE.x + 40, 16, 38],
       frameColor,
@@ -1090,8 +1151,8 @@ function createRenderer(glContext) {
     );
 
     const leftPos = toWorld(GAME_BOUNDS.left - 14, BOARD.centerY, -10);
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [leftPos.x, leftPos.y, leftPos.z],
       [16, BOARD.height * WORLD_SCALE.y + 60, 32],
       frameColor,
@@ -1100,8 +1161,8 @@ function createRenderer(glContext) {
     );
 
     const rightPos = toWorld(GAME_BOUNDS.right + 14, BOARD.centerY, -10);
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [rightPos.x, rightPos.y, rightPos.z],
       [16, BOARD.height * WORLD_SCALE.y + 60, 32],
       frameColor,
@@ -1110,7 +1171,7 @@ function createRenderer(glContext) {
     );
   }
 
-  function drawShield(shieldState, currentTime) {
+  _drawShield(shieldState, currentTime) {
     if (!shieldState) return;
     const remaining = Math.max(0, shieldState.expiresAt - currentTime);
     const intensity = Math.min(1, remaining / SHIELD_DURATION);
@@ -1120,8 +1181,8 @@ function createRenderer(glContext) {
     const center = toWorld(BOARD.centerX, GAME_BOUNDS.bottom + 6, 40);
     const color = [0.2, 0.75 * intensity, 0.65 * intensity];
     const emissive = [0.05, 0.4 * intensity, 0.35 * intensity];
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [center.x, center.y, center.z],
       [width, 10, 28],
       color,
@@ -1130,15 +1191,15 @@ function createRenderer(glContext) {
     );
   }
 
-  function drawPowerUps(powerUps, time) {
+  _drawPowerUps(powerUps, time) {
     for (const powerUp of powerUps) {
       const def = POWER_UP_DEFS[powerUp.type];
       const baseColor = hexToRgb(def.color);
       const emissive = mixColors(baseColor, [1, 1, 1], 0.45);
       const world = toWorld(powerUp.x, powerUp.y, 70 + Math.sin(time * 0.004 + powerUp.x * 0.01) * 10);
       const wobble = Math.sin(time * 0.005 + powerUp.y * 0.02) * 0.35;
-      drawMesh(
-        cubeMesh,
+      this._drawMesh(
+        this.meshes.cube,
         [world.x, world.y, world.z],
         [powerUp.width * WORLD_SCALE.x * 0.55, powerUp.height * WORLD_SCALE.y * 0.5, 26],
         baseColor,
@@ -1148,14 +1209,14 @@ function createRenderer(glContext) {
     }
   }
 
-  function drawRocket(rocketState, time) {
+  _drawRocket(rocketState, time) {
     if (!rocketState) return;
     const world = toWorld(rocketState.x, rocketState.y, 60);
     const color = [0.95, 0.45, 0.85];
     const emissive = [0.65, 0.2, 0.6];
     const rotation = { x: Math.PI / 2, z: Math.sin(time * 0.01) * 0.05 };
-    drawMesh(
-      cubeMesh,
+    this._drawMesh(
+      this.meshes.cube,
       [world.x, world.y, world.z],
       [rocketState.width * WORLD_SCALE.x * 0.5, rocketState.height, 20],
       color,
@@ -1164,7 +1225,7 @@ function createRenderer(glContext) {
     );
   }
 
-  function drawBalls(balls, time) {
+  _drawBalls(balls, time) {
     const spinBase = time * 0.002;
     for (const ballState of balls) {
       const depthSwing = 90 + Math.sin(time * 0.0025 + ballState.x * 0.01) * 14;
@@ -1172,93 +1233,99 @@ function createRenderer(glContext) {
       const ballColor = [0.55, 0.35, 1.0];
       const ballGlow = [0.12, 0.25, 0.8];
       const ballScale = ballState.radius * 2;
-      drawMesh(
-        sphereMesh,
+      this._drawMesh(
+        this.meshes.sphere,
         [ballWorld.x, ballWorld.y + Math.sin(time * 0.003 + ballState.y * 0.01) * 3, ballWorld.z],
         [ballScale, ballScale, ballScale],
         ballColor,
         ballGlow,
-        { x: spinBase * 0.9 + ballState.spin,
+        {
+          x: spinBase * 0.9 + ballState.spin,
           y: spinBase * 0.8 - ballState.spin * 1.8,
-          z: spinBase * 1.1 + ballState.spin * 2.2 }
+          z: spinBase * 1.1 + ballState.spin * 2.2
+        }
       );
     }
   }
 
-  return {
-    handleResize: updateProjection,
-    render(gameState, paddleState, timestamp) {
-      updateProjection();
+  render(gameState, paddleState, timestamp) {
+    this._updateProjection();
 
-      glContext.viewport(0, 0, canvas.width, canvas.height);
-      glContext.clearColor(0.02, 0.05, 0.12, 1);
-      glContext.clear(glContext.COLOR_BUFFER_BIT | glContext.DEPTH_BUFFER_BIT);
+    const gl = this.gl;
+    gl.useProgram(this.program);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0.02, 0.05, 0.12, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-      const cameraSwing = Math.sin(timestamp * 0.00025) * 60;
-      const cameraLift = 210 + Math.sin(timestamp * 0.0004) * 25;
-      const cameraPos = [cameraSwing, cameraLift, 900];
+    const cameraSwing = Math.sin(timestamp * 0.00025) * 60;
+    const cameraLift = 210 + Math.sin(timestamp * 0.0004) * 25;
+    const cameraPos = [cameraSwing, cameraLift, 900];
 
-      Mat4.lookAt(viewMatrix, cameraPos, cameraTarget, up);
+    Mat4.lookAt(this.viewMatrix, cameraPos, this.cameraTarget, this.up);
 
-      glContext.uniformMatrix4fv(uniformLocations.projection, false, projectionMatrix);
-      glContext.uniformMatrix4fv(uniformLocations.view, false, viewMatrix);
+    gl.uniformMatrix4fv(this.uniformLocations.projection, false, this.projectionMatrix);
+    gl.uniformMatrix4fv(this.uniformLocations.view, false, this.viewMatrix);
 
-      const lightDirection = normalizeVec3([0.4, -0.9, -0.5]);
-      glContext.uniform3fv(uniformLocations.lightDirection, lightDirection);
-      glContext.uniform3fv(uniformLocations.lightColor, [0.9, 0.95, 1.0]);
-      glContext.uniform3fv(uniformLocations.ambientColor, [0.12, 0.16, 0.22]);
+    const lightDirection = normalizeVec3([0.4, -0.9, -0.5]);
+    gl.uniform3fv(this.uniformLocations.lightDirection, lightDirection);
+    gl.uniform3fv(this.uniformLocations.lightColor, [0.9, 0.95, 1.0]);
+    gl.uniform3fv(this.uniformLocations.ambientColor, [0.12, 0.16, 0.22]);
 
-      drawBoard(timestamp);
+    this._drawBoard(timestamp);
 
-      for (const brick of gameState.bricks) {
-        if (brick.status === 0) continue;
-        const centerX = brick.x + brick.width / 2;
-        const centerY = brick.y + brick.height / 2;
-        const world = toWorld(centerX, centerY, -brick.row * 24);
-        const color = mixColors(brick.colorPrimaryVec, brick.colorSecondaryVec, 0.35);
-        const emissive = mixColors(brick.colorSecondaryVec, [1, 1, 1], 0.25);
-        drawMesh(
-          cubeMesh,
-          [world.x, world.y, world.z],
-          [brick.width * WORLD_SCALE.x, brick.height * WORLD_SCALE.y, brick.depth],
-          color,
-          emissive,
-          null
-        );
-      }
-
-      const paddleWorld = toWorld(paddleState.x, paddleState.y, 100);
-      const paddleColor = [0.08, 0.88, 0.95];
-      const paddleEmissive = [0.02, 0.32, 0.44];
-      drawMesh(
-        cubeMesh,
-        [paddleWorld.x, paddleWorld.y, paddleWorld.z],
-        [paddleState.width * WORLD_SCALE.x, paddleState.height * WORLD_SCALE.y, paddleState.depth],
-        paddleColor,
-        paddleEmissive,
-        { x: 0, y: Math.sin(timestamp * 0.001) * 0.05, z: 0 }
+    for (const brick of gameState.bricks) {
+      if (brick.status === 0) continue;
+      const centerX = brick.x + brick.width / 2;
+      const centerY = brick.y + brick.height / 2;
+      const world = toWorld(centerX, centerY, -brick.row * 24);
+      const color = mixColors(brick.colorPrimaryVec, brick.colorSecondaryVec, 0.35);
+      const emissive = mixColors(brick.colorSecondaryVec, [1, 1, 1], 0.25);
+      this._drawMesh(
+        this.meshes.cube,
+        [world.x, world.y, world.z],
+        [brick.width * WORLD_SCALE.x, brick.height * WORLD_SCALE.y, brick.depth],
+        color,
+        emissive,
+        null
       );
-
-      drawShield(gameState.shield, timestamp);
-      drawPowerUps(gameState.powerUps, timestamp);
-      drawRocket(gameState.rocket, timestamp);
-      drawBalls(gameState.balls.length ? gameState.balls : [{ x: paddleState.x, y: paddleState.y - paddleState.height, radius: BALL_RADIUS, spin: 0 }], timestamp);
-
-      if (gameState.mode !== 'running') {
-        const markerWorld = toWorld(paddleState.x, paddleState.y - 60, 80);
-        const markerScale = [paddleState.width * 0.4, 6, 24];
-        drawMesh(
-          cubeMesh,
-          [markerWorld.x, markerWorld.y, markerWorld.z],
-          [markerScale[0], markerScale[1], markerScale[2]],
-          [0.22, 0.6, 0.95],
-          [0.1, 0.25, 0.6],
-          { x: Math.PI / 2 }
-        );
-      }
     }
-  };
+
+    const paddleWorld = toWorld(paddleState.x, paddleState.y, 100);
+    const paddleColor = [0.08, 0.88, 0.95];
+    const paddleEmissive = [0.02, 0.32, 0.44];
+    this._drawMesh(
+      this.meshes.cube,
+      [paddleWorld.x, paddleWorld.y, paddleWorld.z],
+      [paddleState.width * WORLD_SCALE.x, paddleState.height * WORLD_SCALE.y, paddleState.depth],
+      paddleColor,
+      paddleEmissive,
+      { x: 0, y: Math.sin(timestamp * 0.001) * 0.05, z: 0 }
+    );
+
+    this._drawShield(gameState.shield, timestamp);
+    this._drawPowerUps(gameState.powerUps, timestamp);
+    this._drawRocket(gameState.rocket, timestamp);
+    const ballsToRender = gameState.balls.length
+      ? gameState.balls
+      : [{ x: paddleState.x, y: paddleState.y - paddleState.height, radius: BALL_RADIUS, spin: 0 }];
+    this._drawBalls(ballsToRender, timestamp);
+
+    if (gameState.mode !== 'running') {
+      const markerWorld = toWorld(paddleState.x, paddleState.y - 60, 80);
+      const markerScale = [paddleState.width * 0.4, 6, 24];
+      this._drawMesh(
+        this.meshes.cube,
+        [markerWorld.x, markerWorld.y, markerWorld.z],
+        [markerScale[0], markerScale[1], markerScale[2]],
+        [0.22, 0.6, 0.95],
+        [0.1, 0.25, 0.6],
+        { x: Math.PI / 2 }
+      );
+    }
+  }
 }
+
+init();
 
 function createProgram(glContext, vertexSource, fragmentSource) {
   const vertexShader = compileShader(glContext, glContext.VERTEX_SHADER, vertexSource);

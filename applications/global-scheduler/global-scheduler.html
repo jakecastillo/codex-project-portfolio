@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Global Scheduler</title>
+  <link rel="stylesheet" href="global-scheduler.css">
+</head>
+<body>
+  <header style="padding: 20px 24px 0; max-width: 1280px; margin: 0 auto;">
+    <a href="../../index.html" style="color: rgba(233, 242, 255, 0.72); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px;">
+      <span aria-hidden="true" style="font-size: 1.1rem;">&larr;</span>
+      Back to portfolio
+    </a>
+  </header>
+  <main>
+    <div id="root" aria-live="polite"></div>
+  </main>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useMemo, useState, useEffect, useId } = React;
+
+    const HOURS = Array.from({ length: 24 }, (_, index) => index);
+    const DAYS_IN_WEEK = 7;
+    const TOTAL_SLOTS = HOURS.length * DAYS_IN_WEEK;
+    const HOUR_MS = 60 * 60 * 1000;
+
+    const DEGREE = String.fromCharCode(176);
+
+    const SUPPORTS_TIMEZONE_LIST = typeof Intl.supportedValuesOf === 'function';
+    const RAW_TIMEZONES = SUPPORTS_TIMEZONE_LIST
+      ? Intl.supportedValuesOf('timeZone')
+      : [
+          'UTC',
+          'Etc/GMT',
+          'Africa/Cairo',
+          'Africa/Johannesburg',
+          'America/Los_Angeles',
+          'America/New_York',
+          'America/Mexico_City',
+          'America/Sao_Paulo',
+          'America/Argentina/Buenos_Aires',
+          'America/Santiago',
+          'America/Vancouver',
+          'Asia/Dubai',
+          'Asia/Kolkata',
+          'Asia/Singapore',
+          'Asia/Tokyo',
+          'Asia/Seoul',
+          'Asia/Hong_Kong',
+          'Asia/Manila',
+          'Australia/Sydney',
+          'Pacific/Auckland',
+          'Europe/London',
+          'Europe/Berlin',
+          'Europe/Paris',
+          'Europe/Stockholm',
+          'Europe/Madrid',
+          'Europe/Zurich'
+        ];
+
+    function slugify(value) {
+      return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+
+    const TIMEZONE_OPTIONS = RAW_TIMEZONES
+      .map((zone) => ({
+        id: `tz-${slugify(zone) || 'utc'}`,
+        type: 'timezone',
+        label: zone,
+        timezone: zone
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+
+    const REGION_LOCATIONS = {
+      americas: [
+        {
+          id: 'loc-new-york',
+          label: 'New York, USA',
+          timezone: 'America/New_York',
+          region: 'Americas',
+          weather: {
+            summary: 'Cool mornings with mid-week thunderstorms',
+            week: [
+              { day: 'Mon', condition: 'Partly Cloudy', high: 24, low: 16 },
+              { day: 'Tue', condition: 'Scattered Storms', high: 23, low: 18 },
+              { day: 'Wed', condition: 'Thunderstorms', high: 25, low: 19 },
+              { day: 'Thu', condition: 'Clearing', high: 27, low: 18 },
+              { day: 'Fri', condition: 'Sunny', high: 28, low: 17 }
+            ]
+          }
+        },
+        {
+          id: 'loc-vancouver',
+          label: 'Vancouver, Canada',
+          timezone: 'America/Vancouver',
+          region: 'Americas',
+          weather: {
+            summary: 'Marine layer mornings with light showers midweek',
+            week: [
+              { day: 'Mon', condition: 'Low Clouds', high: 20, low: 14 },
+              { day: 'Tue', condition: 'Light Showers', high: 19, low: 13 },
+              { day: 'Wed', condition: 'Showers', high: 18, low: 12 },
+              { day: 'Thu', condition: 'Clearing Skies', high: 21, low: 13 },
+              { day: 'Fri', condition: 'Sunny', high: 23, low: 14 }
+            ]
+          }
+        },
+        {
+          id: 'loc-mexico-city',
+          label: 'Mexico City, Mexico',
+          timezone: 'America/Mexico_City',
+          region: 'Americas',
+          weather: {
+            summary: 'Warm afternoons with late-day storms possible',
+            week: [
+              { day: 'Mon', condition: 'Warm', high: 26, low: 14 },
+              { day: 'Tue', condition: 'Afternoon Storms', high: 25, low: 14 },
+              { day: 'Wed', condition: 'Partly Cloudy', high: 25, low: 13 },
+              { day: 'Thu', condition: 'Scattered Storms', high: 24, low: 13 },
+              { day: 'Fri', condition: 'Sunny', high: 26, low: 14 }
+            ]
+          }
+        },
+        {
+          id: 'loc-sao-paulo',
+          label: 'Sao Paulo, Brazil',
+          timezone: 'America/Sao_Paulo',
+          region: 'Americas',
+          weather: {
+            summary: 'Pleasant with scattered afternoon showers',
+            week: [
+              { day: 'Mon', condition: 'Partly Sunny', high: 25, low: 17 },
+              { day: 'Tue', condition: 'Showers', high: 24, low: 18 },
+              { day: 'Wed', condition: 'Warm', high: 26, low: 17 },
+              { day: 'Thu', condition: 'Showers', high: 24, low: 18 },
+              { day: 'Fri', condition: 'Bright', high: 27, low: 17 }
+            ]
+          }
+        },
+        {
+          id: 'loc-buenos-aires',
+          label: 'Buenos Aires, Argentina',
+          timezone: 'America/Argentina/Buenos_Aires',
+          region: 'Americas',
+          weather: {
+            summary: 'Cool nights with sunny stretches midweek',
+            week: [
+              { day: 'Mon', condition: 'Cool', high: 18, low: 10 },
+              { day: 'Tue', condition: 'Sunny', high: 19, low: 9 },
+              { day: 'Wed', condition: 'Partly Cloudy', high: 20, low: 11 },
+              { day: 'Thu', condition: 'Breezy', high: 17, low: 9 },
+              { day: 'Fri', condition: 'Sunny', high: 18, low: 8 }
+            ]
+          }
+        },
+        {
+          id: 'loc-santiago',
+          label: 'Santiago, Chile',
+          timezone: 'America/Santiago',
+          region: 'Americas',
+          weather: {
+            summary: 'Clear and crisp with cool evenings',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 16, low: 5 },
+              { day: 'Tue', condition: 'Sunny', high: 18, low: 6 },
+              { day: 'Wed', condition: 'Partly Cloudy', high: 17, low: 6 },
+              { day: 'Thu', condition: 'Clear Skies', high: 19, low: 7 },
+              { day: 'Fri', condition: 'Sunny', high: 20, low: 8 }
+            ]
+          }
+        }
+      ],
+      europe: [
+        {
+          id: 'loc-london',
+          label: 'London, United Kingdom',
+          timezone: 'Europe/London',
+          region: 'Europe',
+          weather: {
+            summary: 'Mild with bands of showers late week',
+            week: [
+              { day: 'Mon', condition: 'Bright Intervals', high: 18, low: 11 },
+              { day: 'Tue', condition: 'Overcast', high: 17, low: 10 },
+              { day: 'Wed', condition: 'Passing Showers', high: 16, low: 9 },
+              { day: 'Thu', condition: 'Showers', high: 15, low: 8 },
+              { day: 'Fri', condition: 'Late Sun', high: 18, low: 10 }
+            ]
+          }
+        },
+        {
+          id: 'loc-berlin',
+          label: 'Berlin, Germany',
+          timezone: 'Europe/Berlin',
+          region: 'Europe',
+          weather: {
+            summary: 'Warm spells with scattered showers',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 24, low: 13 },
+              { day: 'Tue', condition: 'Passing Showers', high: 22, low: 12 },
+              { day: 'Wed', condition: 'Partly Cloudy', high: 23, low: 13 },
+              { day: 'Thu', condition: 'Showers', high: 21, low: 11 },
+              { day: 'Fri', condition: 'Sunny', high: 25, low: 12 }
+            ]
+          }
+        },
+        {
+          id: 'loc-paris',
+          label: 'Paris, France',
+          timezone: 'Europe/Paris',
+          region: 'Europe',
+          weather: {
+            summary: 'Mild with occasional drizzle',
+            week: [
+              { day: 'Mon', condition: 'Light Rain', high: 19, low: 11 },
+              { day: 'Tue', condition: 'Cloudy', high: 18, low: 10 },
+              { day: 'Wed', condition: 'Sunny', high: 21, low: 11 },
+              { day: 'Thu', condition: 'Drizzle', high: 20, low: 10 },
+              { day: 'Fri', condition: 'Partly Sunny', high: 22, low: 12 }
+            ]
+          }
+        },
+        {
+          id: 'loc-stockholm',
+          label: 'Stockholm, Sweden',
+          timezone: 'Europe/Stockholm',
+          region: 'Europe',
+          weather: {
+            summary: 'Cool breezes with bright afternoons',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 19, low: 9 },
+              { day: 'Tue', condition: 'Breezy', high: 18, low: 8 },
+              { day: 'Wed', condition: 'Partly Sunny', high: 17, low: 7 },
+              { day: 'Thu', condition: 'Cloudy', high: 16, low: 6 },
+              { day: 'Fri', condition: 'Sunny', high: 19, low: 7 }
+            ]
+          }
+        },
+        {
+          id: 'loc-madrid',
+          label: 'Madrid, Spain',
+          timezone: 'Europe/Madrid',
+          region: 'Europe',
+          weather: {
+            summary: 'Hot afternoons with clear nights',
+            week: [
+              { day: 'Mon', condition: 'Hot', high: 32, low: 18 },
+              { day: 'Tue', condition: 'Sunny', high: 33, low: 19 },
+              { day: 'Wed', condition: 'Sunny', high: 34, low: 20 },
+              { day: 'Thu', condition: 'Hot', high: 35, low: 21 },
+              { day: 'Fri', condition: 'Clear', high: 33, low: 19 }
+            ]
+          }
+        }
+      ],
+      africa: [
+        {
+          id: 'loc-lagos',
+          label: 'Lagos, Nigeria',
+          timezone: 'Africa/Lagos',
+          region: 'Africa',
+          weather: {
+            summary: 'Humid with coastal thunderstorms',
+            week: [
+              { day: 'Mon', condition: 'Humid', high: 30, low: 24 },
+              { day: 'Tue', condition: 'Thunderstorms', high: 29, low: 23 },
+              { day: 'Wed', condition: 'Showers', high: 28, low: 23 },
+              { day: 'Thu', condition: 'Humid', high: 30, low: 24 },
+              { day: 'Fri', condition: 'Thunderstorms', high: 29, low: 23 }
+            ]
+          }
+        },
+        {
+          id: 'loc-nairobi',
+          label: 'Nairobi, Kenya',
+          timezone: 'Africa/Nairobi',
+          region: 'Africa',
+          weather: {
+            summary: 'Pleasant with afternoon clouds',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 24, low: 13 },
+              { day: 'Tue', condition: 'Partly Cloudy', high: 23, low: 12 },
+              { day: 'Wed', condition: 'Cloudy', high: 22, low: 12 },
+              { day: 'Thu', condition: 'Sunny', high: 25, low: 13 },
+              { day: 'Fri', condition: 'Showers', high: 23, low: 13 }
+            ]
+          }
+        },
+        {
+          id: 'loc-cape-town',
+          label: 'Cape Town, South Africa',
+          timezone: 'Africa/Johannesburg',
+          region: 'Africa',
+          weather: {
+            summary: 'Windy with cool mornings',
+            week: [
+              { day: 'Mon', condition: 'Windy', high: 18, low: 9 },
+              { day: 'Tue', condition: 'Sunny', high: 19, low: 8 },
+              { day: 'Wed', condition: 'Cloudy', high: 17, low: 7 },
+              { day: 'Thu', condition: 'Sunny', high: 18, low: 8 },
+              { day: 'Fri', condition: 'Windy', high: 19, low: 9 }
+            ]
+          }
+        },
+        {
+          id: 'loc-accra',
+          label: 'Accra, Ghana',
+          timezone: 'Africa/Accra',
+          region: 'Africa',
+          weather: {
+            summary: 'Humid with scattered thunder',
+            week: [
+              { day: 'Mon', condition: 'Humid', high: 30, low: 25 },
+              { day: 'Tue', condition: 'Thunderstorms', high: 29, low: 24 },
+              { day: 'Wed', condition: 'Showers', high: 28, low: 24 },
+              { day: 'Thu', condition: 'Humid', high: 30, low: 25 },
+              { day: 'Fri', condition: 'Thunderstorms', high: 29, low: 24 }
+            ]
+          }
+        }
+      ],
+      middleEast: [
+        {
+          id: 'loc-dubai',
+          label: 'Dubai, UAE',
+          timezone: 'Asia/Dubai',
+          region: 'Middle East',
+          weather: {
+            summary: 'Dry heat with breezy evenings',
+            week: [
+              { day: 'Mon', condition: 'Hot', high: 41, low: 30 },
+              { day: 'Tue', condition: 'Sunny', high: 42, low: 31 },
+              { day: 'Wed', condition: 'Warm', high: 40, low: 30 },
+              { day: 'Thu', condition: 'Hot', high: 41, low: 29 },
+              { day: 'Fri', condition: 'Hot', high: 42, low: 30 }
+            ]
+          }
+        },
+        {
+          id: 'loc-riyadh',
+          label: 'Riyadh, Saudi Arabia',
+          timezone: 'Asia/Riyadh',
+          region: 'Middle East',
+          weather: {
+            summary: 'Dry heat with clear skies',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 43, low: 29 },
+              { day: 'Tue', condition: 'Hot', high: 44, low: 30 },
+              { day: 'Wed', condition: 'Sunny', high: 44, low: 30 },
+              { day: 'Thu', condition: 'Clear', high: 43, low: 29 },
+              { day: 'Fri', condition: 'Sunny', high: 42, low: 28 }
+            ]
+          }
+        },
+        {
+          id: 'loc-doha',
+          label: 'Doha, Qatar',
+          timezone: 'Asia/Qatar',
+          region: 'Middle East',
+          weather: {
+            summary: 'Hot days with humid nights',
+            week: [
+              { day: 'Mon', condition: 'Hot', high: 41, low: 31 },
+              { day: 'Tue', condition: 'Humid', high: 40, low: 32 },
+              { day: 'Wed', condition: 'Sunny', high: 41, low: 32 },
+              { day: 'Thu', condition: 'Hot', high: 42, low: 33 },
+              { day: 'Fri', condition: 'Humid', high: 40, low: 31 }
+            ]
+          }
+        },
+        {
+          id: 'loc-tel-aviv',
+          label: 'Tel Aviv, Israel',
+          timezone: 'Asia/Jerusalem',
+          region: 'Middle East',
+          weather: {
+            summary: 'Warm breezes with coastal haze',
+            week: [
+              { day: 'Mon', condition: 'Warm', high: 30, low: 23 },
+              { day: 'Tue', condition: 'Humid', high: 29, low: 23 },
+              { day: 'Wed', condition: 'Sunny', high: 30, low: 23 },
+              { day: 'Thu', condition: 'Hazy', high: 31, low: 24 },
+              { day: 'Fri', condition: 'Sunny', high: 30, low: 23 }
+            ]
+          }
+        }
+      ],
+      asia: [
+        {
+          id: 'loc-tokyo',
+          label: 'Tokyo, Japan',
+          timezone: 'Asia/Tokyo',
+          region: 'Asia',
+          weather: {
+            summary: 'Humid afternoons with warm nights',
+            week: [
+              { day: 'Mon', condition: 'Humid', high: 29, low: 22 },
+              { day: 'Tue', condition: 'Light Rain', high: 27, low: 21 },
+              { day: 'Wed', condition: 'Breaks of Sun', high: 28, low: 22 },
+              { day: 'Thu', condition: 'Sunny', high: 30, low: 23 },
+              { day: 'Fri', condition: 'Muggy', high: 31, low: 24 }
+            ]
+          }
+        },
+        {
+          id: 'loc-singapore',
+          label: 'Singapore',
+          timezone: 'Asia/Singapore',
+          region: 'Asia',
+          weather: {
+            summary: 'Humid with midday downpours',
+            week: [
+              { day: 'Mon', condition: 'Thunderstorms', high: 31, low: 26 },
+              { day: 'Tue', condition: 'Showers', high: 32, low: 26 },
+              { day: 'Wed', condition: 'Humid', high: 32, low: 26 },
+              { day: 'Thu', condition: 'Thunderstorms', high: 31, low: 25 },
+              { day: 'Fri', condition: 'Showers', high: 32, low: 26 }
+            ]
+          }
+        },
+        {
+          id: 'loc-bengaluru',
+          label: 'Bengaluru, India',
+          timezone: 'Asia/Kolkata',
+          region: 'Asia',
+          weather: {
+            summary: 'Monsoon clouds with warm afternoons',
+            week: [
+              { day: 'Mon', condition: 'Passing Showers', high: 28, low: 20 },
+              { day: 'Tue', condition: 'Storms', high: 27, low: 20 },
+              { day: 'Wed', condition: 'Cloudy', high: 26, low: 19 },
+              { day: 'Thu', condition: 'Partly Sunny', high: 28, low: 20 },
+              { day: 'Fri', condition: 'Showers', high: 27, low: 21 }
+            ]
+          }
+        },
+        {
+          id: 'loc-seoul',
+          label: 'Seoul, South Korea',
+          timezone: 'Asia/Seoul',
+          region: 'Asia',
+          weather: {
+            summary: 'Warm days with evening breezes',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 29, low: 20 },
+              { day: 'Tue', condition: 'Partly Cloudy', high: 28, low: 19 },
+              { day: 'Wed', condition: 'Humid', high: 27, low: 20 },
+              { day: 'Thu', condition: 'Showers', high: 26, low: 19 },
+              { day: 'Fri', condition: 'Sunny', high: 28, low: 19 }
+            ]
+          }
+        },
+        {
+          id: 'loc-hong-kong',
+          label: 'Hong Kong, China',
+          timezone: 'Asia/Hong_Kong',
+          region: 'Asia',
+          weather: {
+            summary: 'Humid with scattered clouds',
+            week: [
+              { day: 'Mon', condition: 'Humid', high: 32, low: 27 },
+              { day: 'Tue', condition: 'Cloudy', high: 31, low: 26 },
+              { day: 'Wed', condition: 'Thunderstorms', high: 30, low: 26 },
+              { day: 'Thu', condition: 'Humid', high: 31, low: 27 },
+              { day: 'Fri', condition: 'Sunny', high: 32, low: 27 }
+            ]
+          }
+        },
+        {
+          id: 'loc-manila',
+          label: 'Manila, Philippines',
+          timezone: 'Asia/Manila',
+          region: 'Asia',
+          weather: {
+            summary: 'Humid with tropical showers',
+            week: [
+              { day: 'Mon', condition: 'Showers', high: 32, low: 26 },
+              { day: 'Tue', condition: 'Thunderstorms', high: 31, low: 26 },
+              { day: 'Wed', condition: 'Humid', high: 32, low: 26 },
+              { day: 'Thu', condition: 'Showers', high: 31, low: 25 },
+              { day: 'Fri', condition: 'Humid', high: 32, low: 26 }
+            ]
+          }
+        }
+      ],
+      oceania: [
+        {
+          id: 'loc-sydney',
+          label: 'Sydney, Australia',
+          timezone: 'Australia/Sydney',
+          region: 'Oceania',
+          weather: {
+            summary: 'Cool mornings with coastal breeze',
+            week: [
+              { day: 'Mon', condition: 'Partly Sunny', high: 20, low: 12 },
+              { day: 'Tue', condition: 'Mostly Cloudy', high: 18, low: 11 },
+              { day: 'Wed', condition: 'Showers', high: 17, low: 10 },
+              { day: 'Thu', condition: 'Clearing', high: 19, low: 11 },
+              { day: 'Fri', condition: 'Sunny', high: 21, low: 12 }
+            ]
+          }
+        },
+        {
+          id: 'loc-auckland',
+          label: 'Auckland, New Zealand',
+          timezone: 'Pacific/Auckland',
+          region: 'Oceania',
+          weather: {
+            summary: 'Cool with ocean breezes',
+            week: [
+              { day: 'Mon', condition: 'Breezy', high: 16, low: 9 },
+              { day: 'Tue', condition: 'Showers', high: 15, low: 8 },
+              { day: 'Wed', condition: 'Partly Sunny', high: 16, low: 8 },
+              { day: 'Thu', condition: 'Cloudy', high: 15, low: 7 },
+              { day: 'Fri', condition: 'Sunny', high: 17, low: 8 }
+            ]
+          }
+        },
+        {
+          id: 'loc-melbourne',
+          label: 'Melbourne, Australia',
+          timezone: 'Australia/Melbourne',
+          region: 'Oceania',
+          weather: {
+            summary: 'Chilly mornings with sunny afternoons',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 16, low: 6 },
+              { day: 'Tue', condition: 'Cloudy', high: 15, low: 7 },
+              { day: 'Wed', condition: 'Sunny', high: 17, low: 6 },
+              { day: 'Thu', condition: 'Showers', high: 14, low: 5 },
+              { day: 'Fri', condition: 'Sunny', high: 16, low: 6 }
+            ]
+          }
+        },
+        {
+          id: 'loc-perth',
+          label: 'Perth, Australia',
+          timezone: 'Australia/Perth',
+          region: 'Oceania',
+          weather: {
+            summary: 'Warm and dry with clear skies',
+            week: [
+              { day: 'Mon', condition: 'Sunny', high: 27, low: 12 },
+              { day: 'Tue', condition: 'Sunny', high: 28, low: 13 },
+              { day: 'Wed', condition: 'Clear', high: 29, low: 14 },
+              { day: 'Thu', condition: 'Sunny', high: 28, low: 13 },
+              { day: 'Fri', condition: 'Sunny', high: 27, low: 12 }
+            ]
+          }
+        },
+        {
+          id: 'loc-wellington',
+          label: 'Wellington, New Zealand',
+          timezone: 'Pacific/Auckland',
+          region: 'Oceania',
+          weather: {
+            summary: 'Windy with scattered showers',
+            week: [
+              { day: 'Mon', condition: 'Windy', high: 14, low: 7 },
+              { day: 'Tue', condition: 'Showers', high: 13, low: 6 },
+              { day: 'Wed', condition: 'Cloudy', high: 13, low: 6 },
+              { day: 'Thu', condition: 'Windy', high: 14, low: 7 },
+              { day: 'Fri', condition: 'Sunny', high: 15, low: 7 }
+            ]
+          }
+        }
+      ]
+    };
+
+    function shuffle(array) {
+      const copy = array.slice();
+      for (let index = copy.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1));
+        const temp = copy[index];
+        copy[index] = copy[randomIndex];
+        copy[randomIndex] = temp;
+      }
+      return copy;
+    }
+
+    function sampleLocations(groups, perRegion = 3) {
+      const selections = [];
+      Object.values(groups).forEach((group) => {
+        const picks = shuffle(group).slice(0, Math.min(perRegion, group.length));
+        selections.push(...picks);
+      });
+      return selections.map((location) => ({
+        id: location.id || `loc-${slugify(location.label)}`,
+        type: 'location',
+        label: location.label,
+        timezone: location.timezone,
+        region: location.region,
+        weather: {
+          summary: location.weather.summary,
+          week: location.weather.week.map((day) => ({ ...day }))
+        }
+      }));
+    }
+
+    const LOCATION_OPTIONS = sampleLocations(REGION_LOCATIONS, 3);
+    const OPTION_CATALOG = [...TIMEZONE_OPTIONS, ...LOCATION_OPTIONS];
+    const OPTION_LOOKUP = new Map(OPTION_CATALOG.map((option) => [option.id, option]));
+
+    function getOffsetLabel(timeZone) {
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone,
+          timeZoneName: 'short'
+        });
+        const parts = formatter.formatToParts(new Date());
+        const zonePart = parts.find((part) => part.type === 'timeZoneName');
+        return zonePart ? zonePart.value : '';
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function getOffsetMinutes(date, timeZone) {
+      try {
+        const formatter = new Intl.DateTimeFormat('en-US', {
+          timeZone,
+          timeZoneName: 'shortOffset'
+        });
+        const parts = formatter.formatToParts(date);
+        const offsetPart = parts.find((part) => part.type === 'timeZoneName');
+        if (!offsetPart) {
+          return 0;
+        }
+        const match = offsetPart.value.match(/GMT(?:(\+|-)(\d{2})(?::(\d{2}))?)?/);
+        if (!match) {
+          return 0;
+        }
+        const sign = match[1] === '-' ? -1 : 1;
+        const hours = Number(match[2] || '0');
+        const minutes = Number(match[3] || '0');
+        return sign * (hours * 60 + minutes);
+      } catch (error) {
+        return 0;
+      }
+    }
+
+    function getWeekStartUtc(timeZone, anchorDate = new Date()) {
+      const referenceDate = new Date(anchorDate);
+      const offsetAtReference = getOffsetMinutes(referenceDate, timeZone);
+      const localReference = new Date(referenceDate.getTime() + offsetAtReference * 60000);
+      const dayIndex = (localReference.getUTCDay() + 6) % 7;
+      const localMonday = new Date(Date.UTC(
+        localReference.getUTCFullYear(),
+        localReference.getUTCMonth(),
+        localReference.getUTCDate() - dayIndex,
+        0,
+        0,
+        0,
+        0
+      ));
+
+      let candidateUtc = new Date(localMonday.getTime() - offsetAtReference * 60000);
+      for (let iteration = 0; iteration < 4; iteration += 1) {
+        const offsetAtCandidate = getOffsetMinutes(candidateUtc, timeZone);
+        const adjustedUtc = new Date(localMonday.getTime() - offsetAtCandidate * 60000);
+        if (Math.abs(adjustedUtc.getTime() - candidateUtc.getTime()) < 1000) {
+          return adjustedUtc;
+        }
+        candidateUtc = adjustedUtc;
+      }
+      return candidateUtc;
+    }
+
+    function normalizeSlotRange(range) {
+      if (!range) return null;
+      const start = Math.min(range.start, range.end);
+      const end = Math.max(range.start, range.end);
+      return { start, end };
+    }
+
+    function convertSlotsToRange(range, weekStartUtc) {
+      const normalized = normalizeSlotRange(range);
+      if (!normalized) return null;
+      const start = weekStartUtc.getTime() + normalized.start * HOUR_MS;
+      const end = weekStartUtc.getTime() + (normalized.end + 1) * HOUR_MS;
+      return { start, end };
+    }
+
+    function convertRangeToSlots(range, weekStartUtc) {
+      if (!range) return null;
+      const start = Math.floor((range.start - weekStartUtc.getTime()) / HOUR_MS);
+      const end = Math.ceil((range.end - weekStartUtc.getTime()) / HOUR_MS) - 1;
+      const clamped = {
+        start: Math.max(0, Math.min(TOTAL_SLOTS - 1, start)),
+        end: Math.max(0, Math.min(TOTAL_SLOTS - 1, end))
+      };
+      return normalizeSlotRange(clamped);
+    }
+
+    function describeRange(range, timeZone) {
+      if (!range) return null;
+      const startDate = new Date(range.start);
+      const endDate = new Date(range.end);
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone
+      });
+      const dayFormatter = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        timeZone
+      });
+      const startLabel = formatter.format(startDate);
+      const endLabel = formatter.format(endDate);
+      const startDay = dayFormatter.format(startDate);
+      const endDay = dayFormatter.format(endDate);
+      const dayWindow = startDay === endDay ? startDay : `${startDay} -> ${endDay}`;
+      const durationHours = Math.max(1, Math.round((range.end - range.start) / HOUR_MS));
+      const durationLabel = `${durationHours} ${durationHours === 1 ? 'hour' : 'hours'}`;
+      return {
+        startLabel,
+        endLabel,
+        dayWindow,
+        durationLabel
+      };
+    }
+
+    function TimezoneClock({ timezone }) {
+      const formatter = useMemo(() => new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZone: timezone
+      }), [timezone]);
+
+      const [currentTime, setCurrentTime] = useState(() => formatter.format(new Date()));
+
+      useEffect(() => {
+        const update = () => setCurrentTime(formatter.format(new Date()));
+        update();
+        const intervalId = window.setInterval(update, 1000);
+        return () => window.clearInterval(intervalId);
+      }, [formatter]);
+
+      return <span className="panel__clock-time">{currentTime}</span>;
+    }
+
+    function SchedulerCalendar({
+      weekStartUtc,
+      activeRangeSlots,
+      isDragging,
+      onBeginSelection,
+      onExtendSelection,
+      onClearSelection,
+      reference
+    }) {
+      const referenceTimeZone = reference?.timezone ?? 'UTC';
+      const referenceLabel = reference?.label ?? 'Coordinated Universal Time';
+
+      const baseLabelFormatter = useMemo(() => new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        timeZone: referenceTimeZone
+      }), [referenceTimeZone]);
+
+      const dayHeaderFormatter = useMemo(() => new Intl.DateTimeFormat('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        timeZone: referenceTimeZone
+      }), [referenceTimeZone]);
+
+      const timeFormatter = useMemo(() => new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: referenceTimeZone
+      }), [referenceTimeZone]);
+
+      const weekEndUtc = useMemo(
+        () => new Date(weekStartUtc.getTime() + (DAYS_IN_WEEK - 1) * 24 * HOUR_MS),
+        [weekStartUtc]
+      );
+      const activeStart = activeRangeSlots ? activeRangeSlots.start : null;
+      const activeEnd = activeRangeSlots ? activeRangeSlots.end : null;
+
+      const handlePointerDown = (event, slotIndex) => {
+        event.preventDefault();
+        onBeginSelection(slotIndex);
+      };
+
+      const handlePointerEnter = (slotIndex) => {
+        if (isDragging) {
+          onExtendSelection(slotIndex);
+        }
+      };
+
+      return (
+        <section className="calendar" aria-label={`${referenceLabel} scheduling grid`}>
+          <header className="calendar__header">
+            <div>
+              <h2 className="calendar__title">Global Scheduler</h2>
+              <p className="calendar__subtitle">
+                Week of {baseLabelFormatter.format(weekStartUtc)} - {baseLabelFormatter.format(weekEndUtc)} ({referenceTimeZone})
+              </p>
+            </div>
+            <div className="calendar__legend">
+              <span><span className="calendar__chip" aria-hidden="true"></span> Selected slot</span>
+              <span>Aligned to {referenceLabel}</span>
+            </div>
+          </header>
+          <div className="calendar__grid">
+            <table role="grid" aria-describedby="calendar-instructions">
+              <thead>
+                <tr>
+                  <th scope="col">Local time</th>
+                  {Array.from({ length: DAYS_IN_WEEK }, (_, dayIndex) => {
+                    const date = new Date(weekStartUtc.getTime() + dayIndex * 24 * HOUR_MS);
+                    return (
+                      <th key={dayIndex} scope="col">
+                        {dayHeaderFormatter.format(date)}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {HOURS.map((hour) => (
+                  <tr key={hour}>
+                    <th scope="row">
+                      {timeFormatter.format(new Date(weekStartUtc.getTime() + hour * HOUR_MS))}
+                    </th>
+                    {Array.from({ length: DAYS_IN_WEEK }, (_, dayIndex) => {
+                      const slotIndex = dayIndex * 24 + hour;
+                      const isSelected = activeRangeSlots && slotIndex >= activeStart && slotIndex <= activeEnd;
+                      const classNames = ['calendar__slot'];
+                      if (isSelected) {
+                        classNames.push('calendar__slot--selected');
+                      }
+                      return (
+                        <td
+                          key={dayIndex}
+                          className={classNames.join(' ')}
+                          role="gridcell"
+                          aria-selected={Boolean(isSelected)}
+                          onPointerDown={(event) => handlePointerDown(event, slotIndex)}
+                          onPointerEnter={() => handlePointerEnter(slotIndex)}
+                        ></td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <footer className="calendar__footer" id="calendar-instructions">
+            <span>Click and drag across the grid to propose a meeting window in the reference timezone.</span>
+            <div>
+              <button type="button" onClick={onClearSelection}>
+                Clear selection
+              </button>
+            </div>
+          </footer>
+        </section>
+      );
+    }
+
+    function TimezonePanel({ option, rangeMs, onRemove, onSelectReference, isReference }) {
+      const offsetLabel = useMemo(() => getOffsetLabel(option.timezone), [option.timezone]);
+      const description = useMemo(() => describeRange(rangeMs, option.timezone), [rangeMs, option.timezone]);
+      const handleSelectReference = () => onSelectReference(option.id);
+
+      return (
+        <section className={`panel ${isReference ? 'panel--reference' : ''}`} aria-label={`${option.label} availability`}>
+          <div className="panel__header">
+            <div>
+              <h3 className="panel__title">{option.label}</h3>
+              <p className="panel__subtitle">
+                <span>Current offset: {offsetLabel || '-'}</span>
+                <button
+                  type="button"
+                  className={`panel__timezone ${isReference ? 'panel__timezone--active' : ''}`}
+                  onClick={handleSelectReference}
+                  aria-pressed={isReference}
+                >
+                  {option.timezone}
+                </button>
+                {isReference ? <span className="panel__reference-tag">Reference</span> : null}
+              </p>
+            </div>
+            <button className="panel__remove" type="button" onClick={() => onRemove(option.id)}>
+              Remove
+            </button>
+          </div>
+          <div className="panel__clock" aria-label={`Current time in ${option.label}`}>
+            <span className="panel__clock-label">Current time</span>
+            <TimezoneClock timezone={option.timezone} />
+          </div>
+          {description ? (
+            <div className="panel__selection">
+              <strong>{description.startLabel}</strong>
+              <div>{description.endLabel}</div>
+              <div>{description.durationLabel} - {description.dayWindow}</div>
+            </div>
+          ) : (
+            <p className="panel__empty">Select a block on the reference grid to preview local times.</p>
+          )}
+          {option.type === 'location' && option.weather ? (
+            <div className="weather" aria-label={`Projected weather for ${option.label}`}>
+              <div className="weather__summary">
+                <strong>{option.weather.summary}</strong>
+                <span>5-day outlook</span>
+              </div>
+              <div className="weather__grid">
+                {option.weather.week.map((day) => (
+                  <div key={day.day} className="weather__day">
+                    <strong>{day.day}</strong>
+                    <span>{day.condition}</span>
+                    <div className="weather__temps">
+                      <span>H {day.high}{DEGREE}</span>
+                      <span>L {day.low}{DEGREE}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      );
+    }
+
+    function AddPanelCard({ options, selectedIds, onAdd }) {
+      const filterId = useId();
+      const selectId = useId();
+      const [search, setSearch] = useState('');
+
+      const filteredOptions = useMemo(() => {
+        const query = search.trim().toLowerCase();
+        return options.filter((option) => {
+          if (selectedIds.has(option.id)) return false;
+          if (!query) return true;
+          return (
+            option.label.toLowerCase().includes(query) ||
+            option.timezone.toLowerCase().includes(query)
+          );
+        });
+      }, [options, selectedIds, search]);
+
+      const [chosenId, setChosenId] = useState(() => filteredOptions[0]?.id || '');
+
+      useEffect(() => {
+        if (filteredOptions.length === 0) {
+          setChosenId('');
+          return;
+        }
+        const exists = filteredOptions.find((option) => option.id === chosenId);
+        if (!exists) {
+          setChosenId(filteredOptions[0].id);
+        }
+      }, [filteredOptions, chosenId]);
+
+      const handleAdd = () => {
+        if (!chosenId) return;
+        onAdd(chosenId);
+      };
+
+      return (
+        <section className="panel panel--add" aria-label="Add timezone or location">
+          <div className="add-panel">
+            <label htmlFor={filterId}>Add timezones or locations</label>
+            <input
+              id={filterId}
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by city, region, or IANA timezone"
+              autoComplete="off"
+            />
+            <select
+              id={selectId}
+              size={Math.min(Math.max(filteredOptions.length, 3), 12)}
+              value={chosenId}
+              onChange={(event) => setChosenId(event.target.value)}
+            >
+              {filteredOptions.length === 0 ? (
+                <option disabled value="">No matches available</option>
+              ) : (
+                filteredOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.type === 'timezone'
+                      ? `Timezone - ${option.label}`
+                      : `Location - ${option.label} (${option.timezone})`}
+                  </option>
+                ))
+              )}
+            </select>
+            <button type="button" onClick={handleAdd} disabled={!chosenId}>
+              Add panel
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    function findTimezoneOption(zone) {
+      return TIMEZONE_OPTIONS.find((option) => option.timezone === zone) || null;
+    }
+
+    function GlobalSchedulerApp() {
+      const baseline = useMemo(() => findTimezoneOption('UTC') || TIMEZONE_OPTIONS[0] || null, []);
+
+      const [panels, setPanels] = useState(() => (baseline ? [baseline] : []));
+      const [referenceId, setReferenceId] = useState(() => baseline?.id ?? null);
+      const [meetingRange, setMeetingRange] = useState(null);
+      const [dragRange, setDragRange] = useState(null);
+
+      const referenceOption = useMemo(() => {
+        if (!panels.length) return null;
+        return panels.find((panel) => panel.id === referenceId) ?? panels[0];
+      }, [panels, referenceId]);
+
+      const weekStartUtc = useMemo(() => {
+        const anchorDate = meetingRange ? new Date(meetingRange.start) : undefined;
+        if (!referenceOption) {
+          return getWeekStartUtc('UTC', anchorDate);
+        }
+        return getWeekStartUtc(referenceOption.timezone, anchorDate);
+      }, [referenceOption, meetingRange]);
+
+      const activeRangeSlots = useMemo(() => {
+        if (dragRange) {
+          return normalizeSlotRange(dragRange);
+        }
+        if (meetingRange) {
+          return convertRangeToSlots(meetingRange, weekStartUtc);
+        }
+        return null;
+      }, [dragRange, meetingRange, weekStartUtc]);
+
+      const effectiveRangeMs = useMemo(() => {
+        if (dragRange) {
+          return convertSlotsToRange(dragRange, weekStartUtc);
+        }
+        return meetingRange;
+      }, [dragRange, meetingRange, weekStartUtc]);
+
+      useEffect(() => {
+        if (!dragRange) return;
+        const finalizeSelection = () => {
+          setMeetingRange((previous) => {
+            const nextRange = convertSlotsToRange(dragRange, weekStartUtc);
+            return nextRange || previous;
+          });
+          setDragRange(null);
+        };
+        window.addEventListener('pointerup', finalizeSelection);
+        window.addEventListener('pointercancel', finalizeSelection);
+        return () => {
+          window.removeEventListener('pointerup', finalizeSelection);
+          window.removeEventListener('pointercancel', finalizeSelection);
+        };
+      }, [dragRange, weekStartUtc]);
+
+      const handleBeginSelection = (slotIndex) => {
+        setDragRange({ start: slotIndex, end: slotIndex });
+      };
+
+      const handleExtendSelection = (slotIndex) => {
+        setDragRange((previous) => (previous ? { ...previous, end: slotIndex } : previous));
+      };
+
+      const handleClearSelection = () => {
+        setMeetingRange(null);
+        setDragRange(null);
+      };
+
+      const handleAddPanel = (optionId) => {
+        const option = OPTION_LOOKUP.get(optionId);
+        if (!option) return;
+        setPanels((previous) => {
+          if (previous.some((panel) => panel.id === option.id)) {
+            return previous;
+          }
+          return [...previous, option];
+        });
+        setReferenceId((current) => current ?? option.id);
+      };
+
+      const handleRemovePanel = (id) => {
+        setPanels((previous) => {
+          const next = previous.filter((panel) => panel.id !== id);
+          setReferenceId((current) => {
+            if (current === id) {
+              return next[0]?.id ?? null;
+            }
+            return current;
+          });
+          if (!next.length) {
+            setMeetingRange(null);
+          }
+          return next;
+        });
+      };
+
+      const handleSelectReference = (id) => {
+        if (!panels.some((panel) => panel.id === id)) return;
+        setReferenceId(id);
+      };
+
+      const selectedIds = useMemo(() => new Set(panels.map((panel) => panel.id)), [panels]);
+
+      return (
+        <>
+          <section className="hero">
+            <div>
+              <p className="hero__eyebrow">Collaboration cockpit</p>
+              <h1 className="hero__title">Coordinate global meetings with confidence</h1>
+              <p className="hero__summary">
+                Plot a proposal in any timezone, then compare what the window looks like across distributed teams. Anchor
+                the grid to a specific region to respect daylight saving shifts while surfacing live clocks and local
+                weather context.
+              </p>
+            </div>
+            <aside className="hero__meta" aria-label="Meeting window tips">
+              <h3>Orchestrate smarter</h3>
+              <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--text-secondary)' }}>
+                <li>Instantly switch the reference timezone straight from each panel.</li>
+                <li>Search across every supported IANA timezone or sample weather-backed cities.</li>
+                <li>Share the live clock snapshots during scheduling sessions.</li>
+              </ul>
+            </aside>
+          </section>
+
+          <div className="scheduler">
+            <SchedulerCalendar
+              weekStartUtc={weekStartUtc}
+              activeRangeSlots={activeRangeSlots}
+              isDragging={Boolean(dragRange)}
+              onBeginSelection={handleBeginSelection}
+              onExtendSelection={handleExtendSelection}
+              onClearSelection={handleClearSelection}
+              reference={referenceOption}
+            />
+            <div className="panels">
+              {panels.map((panel) => (
+                <TimezonePanel
+                  key={panel.id}
+                  option={panel}
+                  rangeMs={effectiveRangeMs}
+                  onRemove={handleRemovePanel}
+                  onSelectReference={handleSelectReference}
+                  isReference={referenceOption ? panel.id === referenceOption.id : false}
+                />
+              ))}
+              <AddPanelCard options={OPTION_CATALOG} selectedIds={selectedIds} onAdd={handleAddPanel} />
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    const rootNode = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootNode);
+    root.render(<GlobalSchedulerApp />);
+  </script>
+</body>
+</html>
