@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codex Sandbox</title>
+    <style>
+      html {
+        height: 100%;
+      }
+
+      :root {
+        color-scheme: dark;
+        --bg-app: #0e1624;
+        --bg-panel: rgba(18, 26, 39, 0.9);
+        --border-subtle: rgba(94, 129, 172, 0.3);
+        --text-primary: #e6ebf5;
+        --text-secondary: rgba(230, 235, 245, 0.7);
+        --accent: #60a5fa;
+        --error: #f87171;
+        --success: #34d399;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        height: 100%;
+        font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: radial-gradient(circle at 0% -20%, rgba(96, 165, 250, 0.22), transparent 55%),
+          radial-gradient(circle at 100% 20%, rgba(244, 114, 182, 0.15), transparent 40%), var(--bg-app);
+        color: var(--text-primary);
+        display: flex;
+        flex-direction: column;
+      }
+
+      main {
+        flex: 1;
+        display: flex;
+        padding: 0;
+        position: relative;
+        min-height: 100%;
+      }
+
+      .sandbox__root {
+        flex: 1;
+        display: flex;
+        position: relative;
+        padding-top: 108px;
+      }
+
+      .sandbox {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-panel);
+        border: none;
+        border-radius: 0;
+        overflow: hidden;
+        backdrop-filter: blur(24px);
+        width: 100%;
+        min-height: 100%;
+        position: relative;
+      }
+
+      .sandbox__header {
+        position: absolute;
+        top: 24px;
+        left: 32px;
+        right: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        z-index: 20;
+        padding: 14px 20px;
+        border-radius: 20px;
+        background: linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(30, 64, 175, 0.58));
+        border: 1px solid rgba(148, 163, 184, 0.32);
+        box-shadow: 0 18px 36px rgba(3, 7, 18, 0.45);
+        backdrop-filter: blur(28px);
+      }
+
+      .sandbox__title-block {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .sandbox__title-block h1 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgba(226, 232, 240, 0.92);
+      }
+
+      .sandbox__title-block p {
+        margin: 0;
+        font-size: 0.85rem;
+        color: rgba(226, 232, 240, 0.68);
+      }
+
+      .sandbox__header a {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        padding: 8px 18px;
+        font-size: 0.85rem;
+        border-radius: 999px;
+        color: rgba(226, 232, 240, 0.9);
+        border: 1px solid rgba(226, 232, 240, 0.28);
+        background: rgba(15, 23, 42, 0.48);
+        transition: background 160ms ease, transform 120ms ease;
+      }
+
+      .sandbox__header a:hover {
+        background: rgba(59, 130, 246, 0.32);
+      }
+
+      .sandbox__header a:active {
+        transform: translateY(1px);
+      }
+
+      @media (max-width: 900px) {
+        .sandbox__header {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 12px;
+        }
+
+        .sandbox__header a {
+          align-self: stretch;
+          justify-content: center;
+        }
+
+        .sandbox__root {
+          padding-top: 148px;
+        }
+      }
+
+      .sandbox__toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        gap: 16px;
+        border-bottom: 1px solid var(--border-subtle);
+        background: rgba(8, 13, 23, 0.6);
+      }
+
+      .toolbar__group {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .toolbar__label {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+
+      .toolbar__control {
+        appearance: none;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-primary);
+        border: 1px solid var(--border-subtle);
+        border-radius: 8px;
+        padding: 6px 12px;
+        font-size: 0.95rem;
+      }
+
+      .toolbar__actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .toolbar__button {
+        appearance: none;
+        padding: 6px 14px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: rgba(96, 165, 250, 0.12);
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: background 160ms ease, transform 120ms ease;
+      }
+
+      .toolbar__button:hover {
+        background: rgba(96, 165, 250, 0.2);
+      }
+
+      .toolbar__button:active {
+        transform: translateY(1px);
+      }
+
+      .sandbox__panes {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+        flex: 1;
+        min-height: 0;
+      }
+
+      .sandbox__panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      .sandbox__panel--editor {
+        border-right: 1px solid var(--border-subtle);
+      }
+
+      .editor {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .sandbox__panel--console {
+        background: rgba(9, 12, 20, 0.6);
+        padding: 18px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .console__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-subtle);
+      }
+
+      .console__header--success {
+        border-color: rgba(52, 211, 153, 0.45);
+      }
+
+      .console__header--error {
+        border-color: rgba(248, 113, 113, 0.5);
+      }
+
+      .console__title {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .console__runtime {
+        margin: 4px 0 0;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+      }
+
+      .console__section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .console__section h3 {
+        margin: 0;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-secondary);
+      }
+
+      .console__list {
+        list-style: none;
+        margin: 0;
+        padding: 12px 12px 12px 16px;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        font-family: 'JetBrains Mono', 'SFMono-Regular', Menlo, Monaco, courier, monospace;
+        font-size: 0.85rem;
+        color: rgba(223, 228, 237, 0.92);
+        max-height: 180px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .console__list li + li {
+        margin-top: 8px;
+      }
+
+      .console__list--error {
+        border-color: rgba(248, 113, 113, 0.35);
+        color: var(--error);
+      }
+
+      .console__list--suggestion li[data-kind='warning'] {
+        color: rgba(250, 204, 21, 0.9);
+      }
+
+      .console__list--suggestion li[data-kind='error'] {
+        color: rgba(248, 113, 113, 0.95);
+      }
+
+      .console__list--suggestion li[data-kind='suggestion'] {
+        color: rgba(96, 165, 250, 0.95);
+      }
+
+      .console__empty {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+      }
+
+      .sandbox__settings {
+        position: absolute;
+        right: 48px;
+        bottom: 48px;
+        width: 260px;
+        background: rgba(8, 13, 23, 0.92);
+        border-radius: 16px;
+        border: 1px solid var(--border-subtle);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        backdrop-filter: blur(18px);
+        box-shadow: 0 18px 36px rgba(2, 6, 23, 0.6);
+      }
+
+      .settings__title {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .settings__form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        font-size: 0.9rem;
+      }
+
+      .settings__field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .settings__field input[type='checkbox'] {
+        accent-color: var(--accent);
+        width: 18px;
+        height: 18px;
+      }
+
+      .settings__field input[type='number'],
+      .settings__field select {
+        appearance: none;
+        border-radius: 8px;
+        border: 1px solid var(--border-subtle);
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+        padding: 6px 10px;
+      }
+
+      @media (max-width: 1080px) {
+        main {
+          padding: 0 20px 24px;
+        }
+
+        .sandbox__panes {
+          grid-template-columns: 1fr;
+        }
+
+        .sandbox__panel--editor {
+          border-right: none;
+          border-bottom: 1px solid var(--border-subtle);
+          min-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="sandbox__header" aria-label="Sandbox navigation">
+        <div class="sandbox__title-block">
+          <h1>Realtime JS/TS Sandbox</h1>
+          <p>Monaco-powered canvas for rapid JavaScript and TypeScript experiments.</p>
+        </div>
+        <a href="../../index.html" aria-label="Back to Codex portfolio">← Back to portfolio</a>
+      </header>
+      <div id="root" class="sandbox__root">Loading sandbox…</div>
+    </main>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/typescript/5.4.5/typescript.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script>
+      (function () {
+        const workerBase = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/';
+
+        window.require.config({
+          paths: {
+            vs: `${workerBase}vs`
+          }
+        });
+
+        window.MonacoEnvironment = {
+          getWorkerUrl: function () {
+            const script = `self.MonacoEnvironment={baseUrl:'${workerBase}'};importScripts('${workerBase}vs/base/worker/workerMain.js');`;
+            return `data:text/javascript;charset=utf-8,${encodeURIComponent(script)}`;
+          }
+        };
+
+        async function loadApp() {
+          try {
+            const response = await fetch('./App.tsx');
+            if (!response.ok) {
+              throw new Error(`Unable to load App.tsx (status ${response.status})`);
+            }
+
+            const source = await response.text();
+            const transformed = Babel.transform(source, {
+              filename: 'App.tsx',
+              presets: ['typescript', 'react'],
+              sourceType: 'module'
+            });
+
+            const runner = new Function('React', 'ReactDOM', 'monaco', 'ts', 'Babel', transformed.code);
+            runner(React, ReactDOM, window.monaco, window.ts, Babel);
+          } catch (error) {
+            console.error('Failed to boot sandbox', error);
+            const root = document.getElementById('root');
+            if (root) {
+              root.textContent = 'Failed to load sandbox. Check console for details.';
+            }
+          }
+        }
+
+        window.require(['vs/editor/editor.main'], loadApp);
+      })();
+    </script>
+  </body>
+</html>

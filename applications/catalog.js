@@ -48,5 +48,30 @@ window.__APPLICATION_CATALOG__ = [
       }
     ],
     "paneClass": "pane--scheduler"
+  },
+  {
+    "id": "js-ts-sandbox",
+    "order": 3,
+    "tag": "Developer Tools",
+    "title": "Realtime JS/TS Sandbox",
+    "summary": "Monaco-powered playground with on-device transpilation, runtime console, and coaching hints.",
+    "description": "Prototype algorithms or micro-interactions with a Monaco editor that speaks both JavaScript and TypeScript. Toggle runtime preferences, capture console output, surface compiler feedback, and iterate quickly without leaving the browser.",
+    "highlights": [
+      "Dynamic Monaco editor with language-aware IntelliSense and theme controls.",
+      "TypeScript transpilation and runtime execution directly in the sandbox.",
+      "Quality checks that flag unused values and share optimization hints after each run."
+    ],
+    "tech": [
+      "React",
+      "TypeScript",
+      "Monaco Editor"
+    ],
+    "links": [
+      {
+        "label": "Launch Sandbox",
+        "href": "./projects/js-ts-sandbox/index.html"
+      }
+    ],
+    "paneClass": "pane--sandbox"
   }
 ];

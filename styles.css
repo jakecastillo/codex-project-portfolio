@@ -352,6 +352,10 @@ body.portfolio {
   background: linear-gradient(150deg, rgba(88, 180, 255, 0.32), rgba(118, 96, 255, 0.32));
 }
 
+.portfolio .pane--sandbox {
+  background: linear-gradient(150deg, rgba(96, 165, 250, 0.34), rgba(139, 92, 246, 0.32));
+}
+
 .portfolio .supporting {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
