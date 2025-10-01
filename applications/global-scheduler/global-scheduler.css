@@ -17,6 +17,40 @@
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+
+
+.is-embedded .global-nav {
+  display: none !important;
+}
+.global-nav {
+  position: fixed;
+  top: clamp(1rem, 2.5vh, 1.5rem);
+  right: clamp(1rem, 3vw, 2rem);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1.2rem;
+  border-radius: 999px;
+  background: rgba(9, 16, 32, 0.72);
+  border: 1px solid rgba(88, 180, 255, 0.35);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.global-nav__link {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+
+.global-nav__link:focus,
+.global-nav__link:hover {
+  color: var(--accent);
+}
+
 * {
   box-sizing: border-box;
 }

@@ -8,11 +8,10 @@
 </head>
 <body>
   <div class="starfield" aria-hidden="true"></div>
+  <nav class="global-nav">
+    <a class="global-nav__link" href="../../index.html">← Back to portfolio</a>
+  </nav>
   <header class="hud">
-    <a class="hud__back" href="../../index.html" aria-label="Return to launch screen">
-      <span aria-hidden="true">&larr;</span>
-      <span class="hud__back-label">Launch Screen</span>
-    </a>
     <h1>Cosmic Breaker</h1>
     <div class="hud__stats">
       <div class="hud__stat">Score: <span id="score">0</span></div>
@@ -37,5 +36,14 @@
   </footer>
 
   <script src="cosmic-breaker.js"></script>
+  <script>
+    (function() {
+      var isEmbedded = window.self !== window.top;
+      var params = new URLSearchParams(window.location.search);
+      if (isEmbedded || params.get('embed') === '1') {
+        document.documentElement.classList.add('is-embedded');
+      }
+    })();
+  </script>
 </body>
 </html>

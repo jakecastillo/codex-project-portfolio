@@ -7,12 +7,9 @@
   <link rel="stylesheet" href="global-scheduler.css">
 </head>
 <body>
-  <header style="padding: 20px 24px 0; max-width: 1280px; margin: 0 auto;">
-    <a href="../../index.html" style="color: rgba(233, 242, 255, 0.72); text-decoration: none; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px;">
-      <span aria-hidden="true" style="font-size: 1.1rem;">&larr;</span>
-      Back to portfolio
-    </a>
-  </header>
+  <nav class="global-nav">
+    <a class="global-nav__link" href="../../index.html">← Back to portfolio</a>
+  </nav>
   <main>
     <div id="root" aria-live="polite"></div>
   </main>
@@ -1165,6 +1162,15 @@
     const rootNode = document.getElementById('root');
     const root = ReactDOM.createRoot(rootNode);
     root.render(<GlobalSchedulerApp />);
+  </script>
+  <script>
+    (function() {
+      var isEmbedded = window.self !== window.top;
+      var params = new URLSearchParams(window.location.search);
+      if (isEmbedded || params.get('embed') === '1') {
+        document.documentElement.classList.add('is-embedded');
+      }
+    })();
   </script>
 </body>
 </html>

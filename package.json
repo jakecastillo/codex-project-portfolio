@@ -4,6 +4,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:catalog": "node ./scripts/build-catalog.mjs"
+    "dev": "vite",
+    "build": "npm run build:catalog && vite build",
+    "postbuild": "node ./scripts/copy-static.mjs",
+    "preview": "npm run build && vite preview",
+    "build:catalog": "node ./scripts/build-catalog.mjs",
+    "build:site": "npm run build"
+  },
+  "dependencies": {
+    "@emotion/react": "11.11.3",
+    "@emotion/styled": "11.11.0",
+    "@mui/icons-material": "5.15.18",
+    "@mui/material": "5.15.18",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.66",
+    "@types/react-dom": "18.2.23",
+    "@vitejs/plugin-react-swc": "3.6.0",
+    "typescript": "5.4.5",
+    "vite": "5.2.11"
   }
 }

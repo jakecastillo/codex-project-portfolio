@@ -16,6 +16,37 @@
   }
 }
 
+
+
+.is-embedded .global-nav {
+  display: none !important;
+}
+.global-nav {
+  position: fixed;
+  top: clamp(0.75rem, 3vh, 1.25rem);
+  right: clamp(0.75rem, 3vw, 1.75rem);
+  z-index: 10;
+  background: rgba(4, 6, 10, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(124, 155, 255, 0.3);
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+}
+
+.global-nav__link {
+  color: var(--text-color);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.global-nav__link:focus,
+.global-nav__link:hover {
+  color: var(--accent);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

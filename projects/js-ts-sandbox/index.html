@@ -21,6 +21,40 @@
         --success: #34d399;
       }
 
+      .is-embedded .global-nav {
+        display: none !important;
+      }
+
+      .global-nav {
+        position: fixed;
+        top: clamp(0.75rem, 2.5vh, 1.2rem);
+        right: clamp(0.75rem, 2.5vw, 1.5rem);
+        z-index: 1000;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.45rem 1.1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(96, 165, 250, 0.35);
+        background: rgba(11, 18, 30, 0.82);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 16px 30px rgba(4, 10, 22, 0.35);
+      }
+
+      .global-nav__link {
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+
+      .global-nav__link:hover,
+      .global-nav__link:focus {
+        color: var(--accent);
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -383,13 +417,15 @@
     </style>
   </head>
   <body>
+    <nav class="global-nav">
+      <a class="global-nav__link" href="../../index.html">← Back to portfolio</a>
+    </nav>
     <main>
       <header class="sandbox__header" aria-label="Sandbox navigation">
         <div class="sandbox__title-block">
           <h1>Realtime JS/TS Sandbox</h1>
           <p>Monaco-powered canvas for rapid JavaScript and TypeScript experiments.</p>
         </div>
-        <a href="../../index.html" aria-label="Back to Codex portfolio">← Back to portfolio</a>
       </header>
       <div id="root" class="sandbox__root">Loading sandbox…</div>
     </main>
@@ -444,5 +480,14 @@
         window.require(['vs/editor/editor.main'], loadApp);
       })();
     </script>
-  </body>
+    <script>
+    (function() {
+      var isEmbedded = window.self !== window.top;
+      var params = new URLSearchParams(window.location.search);
+      if (isEmbedded || params.get('embed') === '1') {
+        document.documentElement.classList.add('is-embedded');
+      }
+    })();
+  </script>
+</body>
 </html>
