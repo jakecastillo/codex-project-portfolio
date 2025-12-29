@@ -4,25 +4,30 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Codex Applications Portfolio</title>
+  <meta name="description" content="Launch-ready product simulations and interactive prototypes built with Codex. Browse featured applications and request a custom build brief.">
+  <meta name="theme-color" content="#04050b">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="portfolio">
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="portfolio__starfield" aria-hidden="true"></div>
   <header class="portfolio__header">
-    <div class="portfolio__brand">
-      <span class="portfolio__mark" aria-hidden="true">◎</span>
-      <div>
-        <p class="portfolio__label">Codex Collective</p>
-        <h1 class="portfolio__title">Application Portfolio</h1>
+    <div class="portfolio__header-inner">
+      <div class="portfolio__brand">
+        <span class="portfolio__mark" aria-hidden="true">◎</span>
+        <div>
+          <p class="portfolio__label">Codex Collective</p>
+          <h1 class="portfolio__title">Application Portfolio</h1>
+        </div>
       </div>
+      <nav class="portfolio__meta" aria-label="Primary">
+        <a class="meta-link" href="#" data-action="request-brief">Request Brief</a>
+        <a class="meta-link" href="mailto:jakecast@hawaii.edu">jakecast@hawaii.edu</a>
+      </nav>
     </div>
-    <nav class="portfolio__meta" aria-label="Primary">
-      <a class="meta-link" href="#" data-action="request-brief">Request Brief</a>
-      <a class="meta-link" href="mailto:jakecast@hawaii.edu">jakecast@hawaii.edu</a>
-    </nav>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="main">
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero__content">
         <p class="hero__eyebrow">Codex-built experiences</p>
@@ -36,6 +41,29 @@
           <a class="cta-button" href="mailto:jakecast@hawaii.edu">Book a discovery call</a>
         </div>
       </div>
+      <aside class="hero__highlight" aria-label="Engagement snapshot">
+        <p class="hero__badge">Delivery-ready</p>
+        <h3 class="hero__highlight-title">From brief to interactive demo</h3>
+        <ul class="hero__list">
+          <li>Clickable prototypes with clear UX flows.</li>
+          <li>Technical blueprints and component breakdowns.</li>
+          <li>Deployment notes your team can reuse.</li>
+        </ul>
+        <div class="metrics" role="list" aria-label="Portfolio metrics">
+          <div class="metrics__item" role="listitem">
+            <div class="metrics__value" data-metric="apps-count">—</div>
+            <div class="metrics__label">Featured builds</div>
+          </div>
+          <div class="metrics__item" role="listitem">
+            <div class="metrics__value">UX</div>
+            <div class="metrics__label">Flow-first design</div>
+          </div>
+          <div class="metrics__item" role="listitem">
+            <div class="metrics__value">Docs</div>
+            <div class="metrics__label">Build playbooks</div>
+          </div>
+        </div>
+      </aside>
     </section>
 
 
@@ -60,6 +88,10 @@
       </div>
     </section>
   </main>
+
+  <footer class="portfolio__footer">
+    <p>Built with Codex • <a href="#" data-action="request-brief">Request a brief</a> • <a href="mailto:jakecast@hawaii.edu">Contact</a></p>
+  </footer>
 
   <aside class="detail-pane hidden" id="detail-pane" role="dialog" aria-modal="true" aria-labelledby="detail-title">
     <div class="detail-pane__scrim" id="detail-scrim"></div>

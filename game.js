@@ -40,6 +40,13 @@ async function loadApplications() {
   return applications;
 }
 
+function updateMetrics(applications) {
+  const count = Array.isArray(applications) ? applications.length : 0;
+  document.querySelectorAll('[data-metric="apps-count"]').forEach((node) => {
+    node.textContent = String(count);
+  });
+}
+
 function createPane(application, index) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -153,15 +160,15 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-const briefLink = document.querySelector('[data-action="request-brief"]');
-if (briefLink) {
+document.querySelectorAll('[data-action="request-brief"]').forEach((briefLink) => {
   briefLink.addEventListener('click', (event) => {
     event.preventDefault();
     window.location.href = 'mailto:jakecast@hawaii.edu?subject=New%20Codex%20Application%20Brief';
   });
-}
+});
 
 loadApplications().then((applications) => {
+  updateMetrics(applications);
   if (!applications.length) {
     const message = document.createElement('p');
     message.className = 'pane-grid__empty';

@@ -1,13 +1,36 @@
 const canvas = document.getElementById('game');
 const gl = canvas.getContext('webgl2', { antialias: true }) || canvas.getContext('webgl', { antialias: true });
 
+const stage = document.getElementById('stage');
+const fxCanvas = document.getElementById('fx');
+
 const overlay = document.getElementById('overlay');
+const overlayContent = document.getElementById('overlay-content');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayMessage = document.getElementById('overlay-message');
 const startButton = document.getElementById('start-button');
 const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('high-score');
 const livesEl = document.getElementById('lives');
 const levelEl = document.getElementById('level');
+const comboEl = document.getElementById('combo');
+
+const pauseButton = document.getElementById('pause-button');
+const fireButton = document.getElementById('fire-button');
+const soundButton = document.getElementById('sound-button');
+const fullscreenButton = document.getElementById('fullscreen-button');
+
+const STORAGE_KEYS = {
+  highScore: 'cosmic-breaker:highScore',
+  soundEnabled: 'cosmic-breaker:soundEnabled'
+};
+
+const audio = createAudioEngine({
+  enabled: readStorageBool(STORAGE_KEYS.soundEnabled, true)
+});
+
+const fx = createFxSystem(fxCanvas);
+
 
 const GAME_MARGIN = 48;
 const GAME_BOUNDS = {
@@ -79,8 +102,13 @@ const paddle = {
 const state = {
   mode: 'ready',
   score: 0,
+  highScore: 0,
   lives: 3,
   level: 1,
+  combo: 0,
+  comboExpiresAt: 0,
+  cameraShake: 0,
+  cameraShakeUntil: 0,
   bricks: [],
   balls: [],
   powerUps: [],
@@ -433,9 +461,11 @@ const FRAGMENT_SHADER_SOURCE = `
 `;
 
 function updateHud() {
-  scoreEl.textContent = state.score;
-  livesEl.textContent = state.lives;
-  levelEl.textContent = state.level;
+  scoreEl.textContent = String(state.score);
+  highScoreEl.textContent = String(state.highScore);
+  livesEl.textContent = String(state.lives);
+  levelEl.textContent = String(state.level);
+  comboEl.textContent = String(state.combo);
 }
 
 function showOverlay(title, message, buttonLabel = 'Launch') {
@@ -447,6 +477,58 @@ function showOverlay(title, message, buttonLabel = 'Launch') {
 
 function hideOverlay() {
   overlay.classList.remove('overlay--visible');
+}
+
+function setHighScore(nextHighScore) {
+  state.highScore = nextHighScore;
+  writeStorage(STORAGE_KEYS.highScore, String(nextHighScore));
+}
+
+function addScore(points) {
+  state.score += points;
+  if (state.score > state.highScore) {
+    setHighScore(state.score);
+  }
+}
+
+function resetCombo() {
+  state.combo = 0;
+  state.comboExpiresAt = 0;
+}
+
+function registerBrickHit(timestamp, brick) {
+  const now = timestamp ?? performance.now();
+  if (state.comboExpiresAt && now <= state.comboExpiresAt) {
+    state.combo += 1;
+  } else {
+    state.combo = 1;
+  }
+
+  state.comboExpiresAt = now + 2200;
+
+  const comboBonus = Math.min(12 * Math.max(0, state.combo - 1), 180);
+  addScore(12 * state.level + comboBonus);
+  updateHud();
+
+  const label = state.combo >= 3 && comboBonus ? `+${comboBonus}` : null;
+  fx.spawnBrickBreak(brick, label);
+  audio.play('brick', Math.min(1, 0.55 + state.combo * 0.06));
+  bumpShake(6 + state.combo * 0.4, now);
+}
+
+function bumpShake(amount, timestamp) {
+  const now = timestamp ?? performance.now();
+  state.cameraShake = Math.min(32, state.cameraShake + amount);
+  state.cameraShakeUntil = Math.max(state.cameraShakeUntil, now + 140);
+}
+
+function updateCameraShake(timestamp) {
+  if (!state.cameraShake) return;
+  if (timestamp <= state.cameraShakeUntil) return;
+  state.cameraShake *= 0.82;
+  if (state.cameraShake < 0.25) {
+    state.cameraShake = 0;
+  }
 }
 
 function baseBallSpeed() {
@@ -474,7 +556,9 @@ function createBall(options = {}) {
     x,
     y,
     velocity: { x: velocity.x, y: velocity.y },
-    spin
+    spin,
+    lastWallFxAt: 0,
+    lastPaddleFxAt: 0
   };
 }
 
@@ -488,6 +572,7 @@ function resetRound(message) {
   state.powerUps = [];
   state.rocket = null;
   state.bricksSinceDrop = 0;
+  resetCombo();
   physicsAccumulator = 0;
   state.lastTime = performance.now();
   if (message) {
@@ -495,10 +580,40 @@ function resetRound(message) {
   } else {
     showOverlay('Launch Sequence Ready', 'Press <strong>Space</strong> or tap <strong>Launch</strong> to continue.');
   }
+  updateControlStates();
+}
+
+function pauseGame() {
+  if (state.mode !== 'running') return;
+  state.mode = 'paused';
+  showOverlay('Paused', 'Press <strong>P</strong> or <strong>Space</strong> to resume.', 'Resume');
+  updateControlStates();
+}
+
+function resumeGame() {
+  if (state.mode !== 'paused') return;
+  hideOverlay();
+  state.mode = 'running';
+  physicsAccumulator = 0;
+  state.lastTime = performance.now();
+  updateControlStates();
+}
+
+function togglePause() {
+  if (state.mode === 'running') {
+    pauseGame();
+  } else if (state.mode === 'paused') {
+    resumeGame();
+  }
 }
 
 function startGame() {
   if (state.mode === 'running') return;
+  if (state.mode === 'paused') {
+    resumeGame();
+    return;
+  }
+  audio.unlock();
   hideOverlay();
   if (state.mode === 'game-over') {
     state.score = 0;
@@ -506,6 +621,7 @@ function startGame() {
     state.level = 1;
     state.shield = null;
     state.bricks = createBricks(state.level);
+    resetCombo();
     resetBalls();
   }
   if (!state.bricks.length) {
@@ -518,14 +634,19 @@ function startGame() {
   state.mode = 'running';
   physicsAccumulator = 0;
   state.lastTime = performance.now();
+  audio.play('launch', 0.7);
   updateHud();
+  updateControlStates();
 }
 
 function advanceLevel() {
   state.level += 1;
   state.bricks = createBricks(state.level);
+  resetCombo();
+  audio.play('level', 0.9);
   resetRound('Sector cleared. Press <strong>Space</strong> or launch to enter the next anomaly.');
   updateHud();
+  updateControlStates();
 }
 
 function gameOver() {
@@ -535,12 +656,17 @@ function gameOver() {
   state.rocket = null;
   state.shield = null;
   state.bricksSinceDrop = 0;
+  resetCombo();
   physicsAccumulator = 0;
+  audio.play('fail', 1);
+  bumpShake(18);
   showOverlay('Mission Failed', `Final score: <strong>${state.score}</strong><br>Press <strong>Space</strong> or launch to restart.`, 'Restart');
   updateHud();
+  updateControlStates();
 }
 
 function handleInput(delta) {
+  if (state.mode !== 'running' && state.mode !== 'ready') return;
   const movement = paddle.speed * delta;
   if (input.left) {
     paddle.x -= movement;
@@ -558,7 +684,7 @@ function positionReadyBalls() {
   }
 }
 
-function handlePaddleCollision(ball) {
+function handlePaddleCollision(ball, timestamp) {
   const paddleTop = paddle.y - paddle.height / 2;
   const paddleBottom = paddle.y + paddle.height / 2;
   const paddleLeft = paddle.x - paddle.width / 2;
@@ -576,6 +702,19 @@ function handlePaddleCollision(ball) {
     ball.velocity.y = -Math.abs(Math.cos(bounceAngle) * speed);
     ball.y = paddleTop - ball.radius - 1;
     ball.spin = (relativeIntersect + (Math.random() - 0.5) * 0.4) * BALL_SPIN_VARIANCE;
+
+    if (state.combo) {
+      resetCombo();
+      updateHud();
+    }
+
+    const now = timestamp ?? performance.now();
+    if (!ball.lastPaddleFxAt || now - ball.lastPaddleFxAt > 70) {
+      ball.lastPaddleFxAt = now;
+      fx.spawnPaddleHit(ball.x, paddleTop);
+      audio.play('paddle', 0.7);
+      bumpShake(5, now);
+    }
     return true;
   }
 
@@ -585,13 +724,10 @@ function handlePaddleCollision(ball) {
 function destroyBrick(brick) {
   if (brick.status === 0) return;
   brick.status = 0;
-  state.score += 12 * state.level;
-  updateHud();
   maybeDropPowerUp(brick);
-  checkLevelCleared();
 }
 
-function handleBrickCollision(ball) {
+function handleBrickCollision(ball, timestamp) {
   for (const brick of state.bricks) {
     if (brick.status === 0) continue;
 
@@ -620,6 +756,8 @@ function handleBrickCollision(ball) {
       }
 
       destroyBrick(brick);
+      registerBrickHit(timestamp, brick);
+      checkLevelCleared();
       return true;
     }
   }
@@ -627,7 +765,7 @@ function handleBrickCollision(ball) {
   return false;
 }
 
-function resolveWallCollision(ball) {
+function resolveWallCollision(ball, timestamp) {
   let collided = false;
   const minX = GAME_BOUNDS.left + ball.radius;
   const maxX = GAME_BOUNDS.right - ball.radius;
@@ -652,10 +790,20 @@ function resolveWallCollision(ball) {
     collided = true;
   }
 
+  if (collided) {
+    const now = timestamp ?? performance.now();
+    if (!ball.lastWallFxAt || now - ball.lastWallFxAt > 90) {
+      ball.lastWallFxAt = now;
+      fx.spawnWallHit(ball.x, ball.y);
+      audio.play('wall', 0.35);
+      bumpShake(3, now);
+    }
+  }
+
   return collided;
 }
 
-function integrateBall(ball, delta) {
+function integrateBall(ball, delta, timestamp) {
   const subSteps = Math.max(1, Math.ceil(delta / MAX_BALL_SUBSTEP));
   const step = delta / subSteps;
 
@@ -663,9 +811,9 @@ function integrateBall(ball, delta) {
     ball.x += ball.velocity.x * step;
     ball.y += ball.velocity.y * step;
 
-    const hitWall = resolveWallCollision(ball);
-    const hitBrick = handleBrickCollision(ball);
-    const hitPaddle = handlePaddleCollision(ball);
+    const hitWall = resolveWallCollision(ball, timestamp);
+    const hitBrick = handleBrickCollision(ball, timestamp);
+    const hitPaddle = handlePaddleCollision(ball, timestamp);
 
     ball.x += ball.spin * 12 * step;
 
@@ -680,13 +828,15 @@ function stepPhysics(delta, timestamp) {
   const activeBalls = [];
 
   for (const ball of state.balls) {
-    integrateBall(ball, delta);
+    integrateBall(ball, delta, timestamp);
 
     if (ball.y + ball.radius >= GAME_BOUNDS.bottom) {
       if (state.shield && state.shield.expiresAt > timestamp) {
         ball.y = GAME_BOUNDS.bottom - ball.radius - 1;
         ball.velocity.y = -Math.abs(ball.velocity.y);
         state.shield = null;
+        audio.play('shield', 0.8);
+        bumpShake(10, timestamp);
         activeBalls.push(ball);
         continue;
       }
@@ -698,6 +848,8 @@ function stepPhysics(delta, timestamp) {
 
   if (!activeBalls.length) {
     state.lives -= 1;
+    audio.play('life', 0.95);
+    bumpShake(16, timestamp);
     updateHud();
     if (state.lives > 0) {
       resetRound('Shields absorbed the hit. Press <strong>Space</strong> to relaunch.');
@@ -772,8 +924,24 @@ function armRocket() {
     y: paddle.y - paddle.height / 2 - ROCKET_HEIGHT / 2,
     width: ROCKET_WIDTH,
     height: ROCKET_HEIGHT,
-    speed: ROCKET_SPEED
+    speed: ROCKET_SPEED,
+    launched: false,
+    launchedAt: 0
   };
+}
+
+function fireRocket(timestamp) {
+  if (!state.rocket || state.rocket.launched || state.mode !== 'running') return false;
+  const now = timestamp ?? performance.now();
+  state.rocket.launched = true;
+  state.rocket.launchedAt = now;
+  state.rocket.x = paddle.x;
+  state.rocket.y = paddle.y - paddle.height / 2 - state.rocket.height / 2;
+  audio.play('rocket', 0.85);
+  bumpShake(10, now);
+  fx.spawnRocketLaunch(state.rocket.x, state.rocket.y);
+  updateControlStates();
+  return true;
 }
 
 function applyPowerUp(type) {
@@ -786,7 +954,7 @@ function applyPowerUp(type) {
   }
 }
 
-function updatePowerUps(delta) {
+function updatePowerUps(delta, timestamp) {
   if (state.mode !== 'running') return;
   state.powerUps = state.powerUps.filter((powerUp) => {
     powerUp.y += powerUp.speed * delta;
@@ -810,6 +978,11 @@ function updatePowerUps(delta) {
         powerUpRight >= paddleLeft &&
         powerUpLeft <= paddleRight) {
       applyPowerUp(powerUp.type);
+      const now = timestamp ?? performance.now();
+      audio.play('powerup', 0.85);
+      fx.spawnPowerUpCollect(powerUp);
+      bumpShake(8, now);
+      updateControlStates();
       return false;
     }
 
@@ -818,6 +991,7 @@ function updatePowerUps(delta) {
 }
 
 function explodeRocket(x, y) {
+  let destroyed = 0;
   const radiusSq = ROCKET_BLAST_RADIUS * ROCKET_BLAST_RADIUS;
   for (const brick of state.bricks) {
     if (brick.status === 0) continue;
@@ -826,14 +1000,16 @@ function explodeRocket(x, y) {
     const distanceSq = (centerX - x) ** 2 + (centerY - y) ** 2;
     if (distanceSq <= radiusSq) {
       destroyBrick(brick);
+      destroyed += 1;
     }
   }
+  return destroyed;
 }
 
-function updateRocket(delta) {
+function updateRocket(delta, timestamp) {
   if (!state.rocket) return;
 
-  if (state.mode !== 'running') {
+  if (state.mode !== 'running' || !state.rocket.launched) {
     state.rocket.x = paddle.x;
     state.rocket.y = paddle.y - paddle.height / 2 - state.rocket.height / 2;
     return;
@@ -852,15 +1028,37 @@ function updateRocket(delta) {
         rocketLeft <= brick.x + brick.width &&
         rocketBottom >= brick.y &&
         rocketTop <= brick.y + brick.height) {
-      explodeRocket(state.rocket.x, rocketTop);
+      const destroyed = explodeRocket(state.rocket.x, rocketTop);
+      const points = destroyed ? destroyed * 18 * state.level : 0;
+      if (points) {
+        addScore(points);
+        updateHud();
+        fx.spawnScoreText(state.rocket.x, rocketTop, `+${points}`);
+      }
+      audio.play('explode', 1);
+      bumpShake(22, timestamp);
+      fx.spawnRocketExplosion(state.rocket.x, rocketTop);
+      checkLevelCleared();
       state.rocket = null;
+      updateControlStates();
       return;
     }
   }
 
   if (rocketTop <= GAME_BOUNDS.top) {
-    explodeRocket(state.rocket.x, GAME_BOUNDS.top);
+    const destroyed = explodeRocket(state.rocket.x, GAME_BOUNDS.top);
+    const points = destroyed ? destroyed * 18 * state.level : 0;
+    if (points) {
+      addScore(points);
+      updateHud();
+      fx.spawnScoreText(state.rocket.x, GAME_BOUNDS.top, `+${points}`);
+    }
+    audio.play('explode', 1);
+    bumpShake(22, timestamp);
+    fx.spawnRocketExplosion(state.rocket.x, GAME_BOUNDS.top);
+    checkLevelCleared();
     state.rocket = null;
+    updateControlStates();
   }
 }
 
@@ -924,20 +1122,25 @@ function loop(timestamp) {
   handleInput(frameDelta);
   positionReadyBalls();
 
-  physicsAccumulator += frameDelta;
-  while (physicsAccumulator >= PHYSICS_STEP) {
-    stepPhysics(PHYSICS_STEP, timestamp);
-    physicsAccumulator -= PHYSICS_STEP;
+  if (state.mode === 'running') {
+    physicsAccumulator += frameDelta;
+    while (physicsAccumulator >= PHYSICS_STEP) {
+      stepPhysics(PHYSICS_STEP, timestamp);
+      physicsAccumulator -= PHYSICS_STEP;
+    }
   }
 
-  updatePowerUps(frameDelta);
-  updateRocket(frameDelta);
+  updatePowerUps(frameDelta, timestamp);
+  updateRocket(frameDelta, timestamp);
   updateShield(timestamp);
+  updateCameraShake(timestamp);
 
   if (renderer) {
     renderer.render(state, paddle, timestamp);
   }
 
+  fx.render(state, paddle, timestamp, frameDelta);
+  updateControlStates();
   requestAnimationFrame(loop);
 }
 
@@ -950,11 +1153,20 @@ function positionFromEvent(event) {
 
 function onPointerMove(event) {
   if (!input.pointerActive) return;
+  event.preventDefault();
   paddle.x = positionFromEvent(event);
 }
 
 function onPointerDown(event) {
+  event.preventDefault();
+  audio.unlock();
   input.pointerActive = true;
+  if (canvas.setPointerCapture) {
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch (error) {
+    }
+  }
   paddle.x = positionFromEvent(event);
 }
 
@@ -963,17 +1175,25 @@ function onPointerUp() {
 }
 
 function init() {
+  state.highScore = readStorageNumber(STORAGE_KEYS.highScore, 0);
   state.bricks = createBricks(state.level);
   resetBalls();
   state.powerUps = [];
   state.rocket = null;
   state.shield = null;
   state.bricksSinceDrop = 0;
+  resetCombo();
   updateHud();
+  updateControlStates();
+  fx.resize(canvas.width, canvas.height);
 
   if (!gl) {
     showOverlay('Renderer Error', 'WebGL is not available, so the 3D mission display cannot initialize.');
     startButton.disabled = true;
+    pauseButton.disabled = true;
+    fireButton.disabled = true;
+    soundButton.disabled = true;
+    fullscreenButton.disabled = true;
     return;
   }
 
@@ -986,12 +1206,61 @@ function init() {
 
 startButton.addEventListener('click', startGame);
 
+pauseButton.addEventListener('click', () => {
+  audio.unlock();
+  togglePause();
+});
+
+fireButton.addEventListener('click', () => {
+  audio.unlock();
+  fireRocket();
+});
+
+soundButton.addEventListener('click', () => {
+  audio.unlock();
+  audio.setEnabled(!audio.enabled);
+  writeStorage(STORAGE_KEYS.soundEnabled, String(audio.enabled));
+  updateControlStates();
+});
+
+fullscreenButton.addEventListener('click', () => {
+  audio.unlock();
+  toggleFullscreen();
+});
+
+overlay.addEventListener('click', () => {
+  if (state.mode === 'ready' || state.mode === 'game-over' || state.mode === 'paused') {
+    startGame();
+  }
+});
+
+overlayContent.addEventListener('click', (event) => {
+  event.stopPropagation();
+});
+
 window.addEventListener('keydown', (event) => {
   if (event.code === 'Space') {
     event.preventDefault();
-    if (state.mode === 'ready' || state.mode === 'game-over') {
+    if (state.mode === 'ready' || state.mode === 'game-over' || state.mode === 'paused') {
       startGame();
     }
+  }
+  if (event.code === 'KeyP') {
+    event.preventDefault();
+    togglePause();
+  }
+  if (event.code === 'Escape' && !document.fullscreenElement) {
+    togglePause();
+  }
+  if (event.code === 'KeyM') {
+    event.preventDefault();
+    audio.setEnabled(!audio.enabled);
+    writeStorage(STORAGE_KEYS.soundEnabled, String(audio.enabled));
+    updateControlStates();
+  }
+  if (event.code === 'KeyF') {
+    event.preventDefault();
+    fireRocket();
   }
   if (event.code === 'ArrowLeft' || event.code === 'KeyA') {
     input.left = true;
@@ -1015,6 +1284,16 @@ canvas.addEventListener('pointermove', onPointerMove);
 window.addEventListener('pointerup', onPointerUp);
 canvas.addEventListener('pointerleave', onPointerUp);
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.mode === 'running') {
+    pauseGame();
+  }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  updateControlStates();
+});
+
 window.addEventListener('resize', () => {
   if (!gl || !renderer) return;
   GAME_BOUNDS.left = GAME_MARGIN;
@@ -1026,6 +1305,7 @@ window.addEventListener('resize', () => {
   BOARD.centerX = (GAME_BOUNDS.left + GAME_BOUNDS.right) / 2;
   BOARD.centerY = (GAME_BOUNDS.top + GAME_BOUNDS.bottom) / 2;
   renderer.handleResize();
+  fx.resize(canvas.width, canvas.height);
   paddle.x = paddle.x;
 });
 
@@ -1260,6 +1540,11 @@ class MissionRenderer {
     const cameraSwing = Math.sin(timestamp * 0.00025) * 60;
     const cameraLift = 210 + Math.sin(timestamp * 0.0004) * 25;
     const cameraPos = [cameraSwing, cameraLift, 900];
+
+    if (gameState.cameraShake) {
+      cameraPos[0] += (Math.random() - 0.5) * gameState.cameraShake;
+      cameraPos[1] += (Math.random() - 0.5) * gameState.cameraShake * 0.6;
+    }
 
     Mat4.lookAt(this.viewMatrix, cameraPos, this.cameraTarget, this.up);
 
@@ -1546,4 +1831,382 @@ function mixColors(a, b, t) {
     a[1] * (1 - t) + b[1] * t,
     a[2] * (1 - t) + b[2] * t
   ];
+}
+
+var lastControlSignature = '';
+
+function updateControlStates() {
+  if (!pauseButton || !fireButton || !soundButton || !fullscreenButton) return;
+
+  const canPause = state.mode === 'running' || state.mode === 'paused';
+  const canFire = Boolean(state.rocket && !state.rocket.launched && state.mode === 'running');
+  const isFullscreen = Boolean(document.fullscreenElement);
+  const signature = `${state.mode}|${canFire ? 1 : 0}|${audio.enabled ? 1 : 0}|${isFullscreen ? 1 : 0}`;
+  if (signature === lastControlSignature) return;
+  lastControlSignature = signature;
+
+  pauseButton.disabled = !canPause;
+  pauseButton.textContent = state.mode === 'paused' ? 'Resume' : 'Pause';
+  fireButton.disabled = !canFire;
+  soundButton.setAttribute('aria-pressed', audio.enabled ? 'true' : 'false');
+  soundButton.textContent = audio.enabled ? 'Sound' : 'Muted';
+  fullscreenButton.textContent = isFullscreen ? 'Exit' : 'Full';
+  fullscreenButton.disabled = !stage || (!stage.requestFullscreen && !document.fullscreenElement);
+}
+
+async function toggleFullscreen() {
+  if (!stage) return;
+  try {
+    if (!document.fullscreenElement) {
+      if (!stage.requestFullscreen) return;
+      await stage.requestFullscreen();
+    } else if (document.exitFullscreen) {
+      await document.exitFullscreen();
+    }
+  } catch (error) {
+  }
+}
+
+function readStorageNumber(key, fallbackValue) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallbackValue;
+  } catch (error) {
+    return fallbackValue;
+  }
+}
+
+function readStorageBool(key, fallbackValue) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return fallbackValue;
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    return fallbackValue;
+  } catch (error) {
+    return fallbackValue;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+  }
+}
+
+function createAudioEngine(options = {}) {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  let enabled = options.enabled !== false;
+  let unlocked = false;
+  let context = null;
+  let masterGain = null;
+  const lastPlayedAt = new Map();
+
+  function ensureContext() {
+    if (!enabled || !AudioContextCtor) return null;
+    if (!context) {
+      context = new AudioContextCtor();
+      masterGain = context.createGain();
+      masterGain.gain.value = 0.12;
+      masterGain.connect(context.destination);
+    }
+    return context;
+  }
+
+  function unlock() {
+    const ctx = ensureContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    unlocked = true;
+    if (masterGain) {
+      const now = ctx.currentTime;
+      masterGain.gain.cancelScheduledValues(now);
+      masterGain.gain.setTargetAtTime(enabled ? 0.12 : 0, now, 0.02);
+    }
+  }
+
+  function setEnabled(nextEnabled) {
+    enabled = Boolean(nextEnabled);
+    if (!context || !masterGain) return;
+    const now = context.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setTargetAtTime(enabled ? 0.12 : 0, now, 0.02);
+  }
+
+  function playTone({ type = 'sine', frequency, frequencyEnd, duration, gain, detune = 0 }) {
+    if (!enabled || !unlocked) return;
+    const ctx = ensureContext();
+    if (!ctx || !masterGain) return;
+    const now = ctx.currentTime;
+
+    const oscillator = ctx.createOscillator();
+    const envelope = ctx.createGain();
+    oscillator.type = type;
+    oscillator.detune.value = detune;
+    oscillator.frequency.setValueAtTime(Math.max(40, frequency), now);
+    if (frequencyEnd) {
+      oscillator.frequency.exponentialRampToValueAtTime(Math.max(40, frequencyEnd), now + duration);
+    }
+    envelope.gain.setValueAtTime(0.0001, now);
+    envelope.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), now + 0.01);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    oscillator.connect(envelope);
+    envelope.connect(masterGain);
+    oscillator.start(now);
+    oscillator.stop(now + duration + 0.02);
+  }
+
+  function playNoise({ duration, gain, cutoff = 700 }) {
+    if (!enabled || !unlocked) return;
+    const ctx = ensureContext();
+    if (!ctx || !masterGain) return;
+    const now = ctx.currentTime;
+
+    const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i += 1) {
+      data[i] = (Math.random() * 2 - 1) * 0.85;
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = cutoff;
+
+    const envelope = ctx.createGain();
+    envelope.gain.setValueAtTime(0.0001, now);
+    envelope.gain.exponentialRampToValueAtTime(Math.max(0.0001, gain), now + 0.01);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    source.connect(filter);
+    filter.connect(envelope);
+    envelope.connect(masterGain);
+    source.start(now);
+    source.stop(now + duration + 0.02);
+  }
+
+  function play(eventName, intensity = 1) {
+    if (!enabled || !unlocked) return;
+    const ctx = ensureContext();
+    if (!ctx) return;
+
+    const nowMs = performance.now();
+    const last = lastPlayedAt.get(eventName) ?? 0;
+    if (nowMs - last < 22) return;
+    lastPlayedAt.set(eventName, nowMs);
+
+    const strength = Math.max(0.15, Math.min(1.25, intensity));
+    if (eventName === 'launch') {
+      playTone({ type: 'sawtooth', frequency: 190, frequencyEnd: 520, duration: 0.16, gain: 0.06 * strength });
+    } else if (eventName === 'paddle') {
+      playTone({ type: 'triangle', frequency: 260, duration: 0.07, gain: 0.055 * strength });
+    } else if (eventName === 'wall') {
+      playTone({ type: 'sine', frequency: 180, duration: 0.05, gain: 0.035 * strength });
+    } else if (eventName === 'brick') {
+      playTone({ type: 'square', frequency: 740, duration: 0.06, gain: 0.04 * strength, detune: (Math.random() - 0.5) * 18 });
+    } else if (eventName === 'powerup') {
+      playTone({ type: 'sine', frequency: 560, duration: 0.08, gain: 0.04 * strength });
+      playTone({ type: 'sine', frequency: 840, duration: 0.1, gain: 0.03 * strength });
+    } else if (eventName === 'rocket') {
+      playTone({ type: 'sawtooth', frequency: 240, frequencyEnd: 120, duration: 0.18, gain: 0.05 * strength });
+    } else if (eventName === 'explode') {
+      playNoise({ duration: 0.18, gain: 0.065 * strength, cutoff: 820 });
+      playTone({ type: 'sine', frequency: 90, duration: 0.14, gain: 0.035 * strength });
+    } else if (eventName === 'shield') {
+      playTone({ type: 'sine', frequency: 920, duration: 0.08, gain: 0.045 * strength });
+    } else if (eventName === 'life') {
+      playTone({ type: 'sawtooth', frequency: 260, frequencyEnd: 120, duration: 0.22, gain: 0.06 * strength });
+    } else if (eventName === 'level') {
+      playTone({ type: 'triangle', frequency: 420, duration: 0.12, gain: 0.04 * strength });
+      playTone({ type: 'triangle', frequency: 630, duration: 0.16, gain: 0.035 * strength });
+    } else if (eventName === 'fail') {
+      playTone({ type: 'sawtooth', frequency: 120, frequencyEnd: 70, duration: 0.34, gain: 0.07 * strength });
+      playNoise({ duration: 0.12, gain: 0.04 * strength, cutoff: 260 });
+    }
+  }
+
+  return {
+    unlock,
+    play,
+    setEnabled,
+    get enabled() {
+      return enabled;
+    }
+  };
+}
+
+function createFxSystem(canvasElement) {
+  const ctx = canvasElement?.getContext?.('2d');
+  const particles = [];
+  const texts = [];
+
+  function resize(width, height) {
+    if (!canvasElement || !ctx) return;
+    if (canvasElement.width !== width) canvasElement.width = width;
+    if (canvasElement.height !== height) canvasElement.height = height;
+  }
+
+  function hexToRgba(hex, alpha) {
+    const normalized = (hex || '#ffffff').replace('#', '');
+    const bigint = parseInt(normalized, 16);
+    if (Number.isNaN(bigint)) return `rgba(255,255,255,${alpha})`;
+    const r = (bigint >> 16) & 255;
+    const g = (bigint >> 8) & 255;
+    const b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function spawnSparks(x, y, color, count, minSpeed, maxSpeed) {
+    for (let i = 0; i < count; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = minSpeed + Math.random() * (maxSpeed - minSpeed);
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: 2.5 + Math.random() * 2.2,
+        age: 0,
+        life: 0.4 + Math.random() * 0.25,
+        color
+      });
+    }
+  }
+
+  function spawnScoreText(x, y, text) {
+    texts.push({
+      x,
+      y,
+      text,
+      vy: -40 - Math.random() * 30,
+      age: 0,
+      life: 0.9
+    });
+  }
+
+  function spawnBrickBreak(brick, label) {
+    const centerX = brick.x + brick.width / 2;
+    const centerY = brick.y + brick.height / 2;
+    spawnSparks(centerX, centerY, hexToRgba(brick.colorSecondary, 0.9), 18, 120, 280);
+    spawnSparks(centerX, centerY, hexToRgba(brick.color, 0.75), 10, 90, 200);
+    if (label) {
+      spawnScoreText(centerX, centerY, label);
+    }
+  }
+
+  function spawnWallHit(x, y) {
+    spawnSparks(x, y, 'rgba(0,247,255,0.65)', 10, 80, 180);
+  }
+
+  function spawnPaddleHit(x, y) {
+    spawnSparks(x, y, 'rgba(107,247,194,0.7)', 12, 90, 220);
+  }
+
+  function spawnPowerUpCollect(powerUp) {
+    spawnSparks(powerUp.x, powerUp.y, 'rgba(255,230,109,0.8)', 18, 120, 320);
+    spawnScoreText(powerUp.x, powerUp.y, POWER_UP_DEFS[powerUp.type]?.label ?? 'OK');
+  }
+
+  function spawnRocketLaunch(x, y) {
+    spawnSparks(x, y, 'rgba(255,107,246,0.75)', 18, 140, 360);
+  }
+
+  function spawnRocketExplosion(x, y) {
+    spawnSparks(x, y, 'rgba(255,107,246,0.85)', 30, 180, 520);
+    spawnSparks(x, y, 'rgba(0,247,255,0.65)', 18, 140, 420);
+  }
+
+  function render(gameState, paddleState, timestamp, delta) {
+    if (!ctx || !canvasElement) return;
+    const dt = Math.min(0.05, Math.max(0, delta ?? 0));
+
+    for (let i = particles.length - 1; i >= 0; i -= 1) {
+      const particle = particles[i];
+      particle.age += dt;
+      if (particle.age >= particle.life) {
+        particles.splice(i, 1);
+        continue;
+      }
+      particle.x += particle.vx * dt;
+      particle.y += particle.vy * dt;
+      particle.vy += 260 * dt;
+      particle.vx *= 0.985;
+      particle.vy *= 0.985;
+    }
+
+    for (let i = texts.length - 1; i >= 0; i -= 1) {
+      const text = texts[i];
+      text.age += dt;
+      if (text.age >= text.life) {
+        texts.splice(i, 1);
+        continue;
+      }
+      text.y += text.vy * dt;
+    }
+
+    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    const shake = (gameState.cameraShake || 0) * 0.25;
+    ctx.save();
+    if (shake) {
+      ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+    }
+
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.shadowBlur = 14;
+    for (const particle of particles) {
+      const t = particle.age / particle.life;
+      const alpha = 1 - t;
+      const size = particle.size * (0.7 + alpha * 0.5);
+      ctx.fillStyle = particle.color;
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = particle.color;
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.font = '700 18px system-ui, -apple-system, Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const text of texts) {
+      const t = text.age / text.life;
+      const alpha = 1 - t;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(232,246,255,0.92)';
+      ctx.fillText(text.text, text.x, text.y);
+    }
+
+    if (gameState.rocket && !gameState.rocket.launched && gameState.mode === 'running') {
+      ctx.globalAlpha = 0.85 + Math.sin(timestamp * 0.01) * 0.1;
+      ctx.font = '700 13px system-ui, -apple-system, Segoe UI, sans-serif';
+      ctx.fillStyle = 'rgba(255,107,246,0.9)';
+      ctx.fillText('ROCKET READY', paddleState.x, paddleState.y - 46);
+    }
+
+    ctx.restore();
+  }
+
+  return {
+    resize,
+    render,
+    spawnBrickBreak,
+    spawnWallHit,
+    spawnPaddleHit,
+    spawnPowerUpCollect,
+    spawnRocketLaunch,
+    spawnRocketExplosion,
+    spawnScoreText
+  };
 }
